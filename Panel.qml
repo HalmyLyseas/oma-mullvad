@@ -1631,7 +1631,7 @@ Panel {
       Text {
         textFormat: Text.PlainText
         width: parent.width
-        text: service.daemonRunning ? "Running (pid " + service.daemonPid + ")" : "Unavailable"
+        text: service.daemonRunning ? (service.daemonPid > 0 ? "Running (pid " + service.daemonPid + ")" : "Running") : "Unavailable"
         color: service.daemonRunning ? root.foreground : root.urgent
         font.family: root.fontFamily
         font.pixelSize: Style.font.body

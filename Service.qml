@@ -197,6 +197,7 @@ Item {
     // daemon (no network of its own); "packageInfo" only reads local
     // pacman metadata files.
     _enqueueRead("version", ["mullvad", "version"])
+    _enqueueRead("daemonPid", ["pgrep", "-x", "mullvad-daemon"])
     _enqueueRead("packageInfo", [packageInfoScript])
   }
 
