@@ -11,8 +11,12 @@ const ROOT = join(__dirname, "..");
 
 function shippedFiles() {
   const out = execFileSync("git", ["ls-files"], { cwd: ROOT, encoding: "utf8" });
+  // .github/** is CI-only infra: never installed on, or run by, a user's
+  // machine, and legitimately needs pacman-shaped literals and longer step
+  // comments -- exempt from this file's own scan (docs/threat-model.md).
   return out.split("\n").filter(Boolean)
-    .filter(f => !f.startsWith("test/fixtures/") && f !== "preview.png");
+    .filter(f => !f.startsWith("test/fixtures/") && f !== "preview.png")
+    .filter(f => !f.startsWith(".github/"));
 }
 
 // A comment "run" is any stretch of consecutive whole-comment lines, bare

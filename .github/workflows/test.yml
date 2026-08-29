@@ -1,0 +1,78 @@
+name: test
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      # An archlinux:latest container ships pacman but not git; git is not
+      # one of pacman's own dependencies, so install it before checkout can
+      # run (steps execute in the order listed, checkout does not have to
+      # be first).
+      - name: Install git
+        run: pacman -Sy --noconfirm git
+
+      - uses: actions/checkout@v4
+
+      - name: Enable the omarchy pacman repo
+        run: |
+          # Same repo/SigLevel an installed Omarchy system carries in
+          # /etc/pacman.conf -- Optional TrustAll is the upstream project's
+          # own choice, not something loosened for CI.
+          printf '[omarchy]\nSigLevel = Optional TrustAll\nServer = https://pkgs.omarchy.org/stable/$arch\n' >> /etc/pacman.conf
+
+      - name: Install test dependencies
+        run: |
+          # Measured set: quickshell (qs, and pulls in qt6-declarative's
+          # qmllint as a side effect) + cage (headless Wayland compositor)
+          # run the probe suites; nodejs runs the JS suites; procps-ng
+          # provides `ps` (the excluded-processes read); pacman-contrib
+          # provides `checkupdates` (mocked in every test, but present on
+          # every real Omarchy box, since the `omarchy` package itself
+          # depends on it -- kept here for parity, not because a test needs
+          # the real binary).
+          pacman -Syu --noconfirm quickshell cage nodejs procps-ng pacman-contrib
+
+      - name: Extract the Omarchy shell QML tree
+        run: |
+          # The `omarchy` package itself is a ~120MB meta-package that pulls
+          # in the whole desktop (hyprland, sddm, limine, snapper, pipewire,
+          # wireplumber, gnome-keyring, uwsm, xdg-desktop-portal-hyprland...)
+          # via its own Depends, none of which this headless test run needs
+          # -- only the static QML files under /usr/share/omarchy/shell,
+          # which BarWidget.qml/Panel.qml import as qs.Ui/qs.Commons.
+          # `pacman -Sw` downloads the package to the local cache without
+          # installing it or resolving its dependency chain; bsdtar then
+          # extracts just that one subtree. bsdtar is always present in
+          # this container: it ships in libarchive, which is a hard
+          # dependency of pacman itself, so no extra package is needed for
+          # it. The package has no .INSTALL scriptlet (verified against the
+          # locally cached package at authoring time), so nothing is lost
+          # by never running `pacman -S omarchy`.
+          pacman -Sw --noconfirm omarchy
+          bsdtar -x -C / -f /var/cache/pacman/pkg/omarchy-*-any.pkg.tar.zst usr/share/omarchy/shell
+
+      - name: Node unit tests (Model.js, QML Text-sink audit, comment hygiene)
+        run: node --test test/*.test.js
+
+      - name: Packaged-scripts suite
+        run: bash test/scripts.test.sh
+
+      - name: CLI contract (read-only; skips cleanly without a real mullvad CLI)
+        run: node test/cli-contract.mjs
+
+      - name: Headless service/UI probes (cage)
+        env:
+          WLR_BACKENDS: headless
+          WLR_RENDERER: pixman
+          WLR_LIBINPUT_NO_DEVICES: "1"
+          XDG_RUNTIME_DIR: /tmp/xdg-runtime
+        run: |
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          cage -- bash test/probe/run
+          cage -- bash test/probe/run-ui
