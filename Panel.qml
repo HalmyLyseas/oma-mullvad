@@ -370,6 +370,10 @@ Panel {
   function showPage(index) {
     var target = Math.max(0, Math.min(4, index))
     if (!pageAvailable(target)) return
+    // The Excluded search is one-shot: leaving the page (or launching,
+    // or reopening the panel) clears it so the tab always comes back to
+    // the recent-apps list with an empty box.
+    if (target !== pageIndex) appQuery = ""
     pageIndex = target
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
   }
@@ -460,6 +464,7 @@ Panel {
   onSettingsChanged: syncInlineSettings()
   onOpenedChanged: if (opened) {
     root.nowMs = Date.now()
+    root.appQuery = ""
     pageFlick.contentY = 0
     service.refreshAll()
     if (bar && bar.shell && bar.shell.appLibrary && bar.shell.appLibrary.refreshIcons) bar.shell.appLibrary.refreshIcons()
@@ -1877,6 +1882,7 @@ Panel {
       if (service.busy || !app || !app.id) return
       service.launchExcludedApp(String(app.id))
       root.recordRecentApp(String(app.id))
+      root.appQuery = ""
       root.close()
     }
 
