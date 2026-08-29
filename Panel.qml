@@ -33,6 +33,10 @@ Panel {
   property var recentExcludedApps: []
   property var pendingConfirmation: null
   property bool syncingSettings: false
+  // Debug-only, read externally by the UI probe: pageLoader's page
+  // Components have their own id scope, so this is the only way in to a
+  // page's own properties (e.g. the Excluded tab's `groups`/`apps`).
+  readonly property var _debugPageItem: pageLoader.item
   // Relative-time labels on the System tab read this instead of Date.now()
   // so a panel left open keeps counting up ("just now" -> "5m ago").
   property double nowMs: Date.now()

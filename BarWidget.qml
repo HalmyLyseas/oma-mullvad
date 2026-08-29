@@ -86,6 +86,13 @@ BarWidget {
   onSettingsChanged: { injectPanel(); _pushPollInterval() }
   onSvcChanged: { _loadPanel(); injectPanel(); _pushPollInterval() }
 
+  // Debug-only, read externally by the UI probe: panelLoader's id is
+  // private to this file, so these are the only way to observe the
+  // svc-gated destroy/recreate lifecycle without opening the real popup.
+  readonly property var _debugPanelItem: panelLoader.item
+  readonly property bool _debugPanelActive: panelLoader.active
+  readonly property int _debugPanelStatus: panelLoader.status
+
   Loader {
     id: panelLoader
     // No `source` binding; created via root._loadPanel()'s setSource(url,
