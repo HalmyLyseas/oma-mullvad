@@ -1,0 +1,45 @@
+#!/bin/bash
+# scripts/mullvad-package-info -- reads pacman's LOCAL package database
+# `desc` files for mullvad-vpn / mullvad-vpn-daemon and prints one line per
+# installed package: name<TAB>version<TAB>installdate<TAB>builddate.
+#
+# No network access, no privileges, and no package-manager command is ever
+# invoked here -- this only reads root-owned but world-readable plain-text
+# files pacman itself already maintains on disk (~1 KB each). A missing
+# package is silently skipped (prints nothing for it), never an error.
+#
+# PACMAN_LOCAL_DIR lets tests point this at a fixture tree instead of the
+# real /var/lib/pacman/local.
+set -uo pipefail
+
+PACMAN_LOCAL_DIR="${PACMAN_LOCAL_DIR:-/var/lib/pacman/local}"
+
+extract_field() {
+  # $1 = field name without the surrounding %...%, $2 = desc file content.
+  # pacman's desc format is "%FIELD%\nvalue\n\n" -- print the line right
+  # after the matching %FIELD% marker, then stop.
+  awk -v field="%$1%" '
+    $0 == field { want = 1; next }
+    want { print; exit }
+  ' <<<"$2"
+}
+
+for name in mullvad-vpn mullvad-vpn-daemon; do
+  desc_file=""
+  for candidate in "$PACMAN_LOCAL_DIR/$name"-[0-9]*/desc; do
+    [[ -f "$candidate" ]] || continue
+    desc_file="$candidate"
+    break
+  done
+  [[ -n "$desc_file" ]] || continue
+
+  content="$(head -c 65536 "$desc_file" 2>/dev/null)" || continue
+  version="$(extract_field VERSION "$content")"
+  [[ -n "$version" ]] || continue
+  installdate="$(extract_field INSTALLDATE "$content")"
+  builddate="$(extract_field BUILDDATE "$content")"
+
+  printf '%s\t%s\t%s\t%s\n' "$name" "$version" "${installdate:-0}" "${builddate:-0}"
+done
+
+exit 0

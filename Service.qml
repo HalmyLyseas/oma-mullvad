@@ -15,6 +15,10 @@ Item {
   readonly property int finiteOutputLines: 4096
   readonly property int finiteOutputChars: 262144
   readonly property int listenerLineChars: 8192
+  // T2 (16-s8-feedback-spec.md): System-tab helper scripts, resolved the
+  // same way as commandGuard above.
+  readonly property string packageInfoScript: String(Qt.resolvedUrl("scripts/mullvad-package-info")).replace(/^file:\/\//, "")
+  readonly property string updateCheckScript: String(Qt.resolvedUrl("scripts/mullvad-update-check")).replace(/^file:\/\//, "")
 
   property bool installed: false
   property bool daemonRunning: false
@@ -53,6 +57,18 @@ Item {
   property var antiCensorship: ({ mode: "auto", port: "any" })
   property var excludedPids: []
 
+  // T2 (16-s8-feedback-spec.md): System tab -- binaries/daemon/updates.
+  property string cliVersion: ""
+  property string daemonVersion: ""
+  property var daemonSupported: null // bool|null
+  property string suggestedUpgrade: ""
+  property var packages: [] // [{ name, version, installedAt, buildAt }]
+  property int daemonPid: 0
+  property string updateCheckStatus: "never" // never|checking|ok|unavailable
+  property int updateCheckedAt: 0 // ms epoch, 0 = never
+  property bool updateAvailable: false
+  property var updateTargets: [] // [{ name, current, latest }]
+
   property string actionStatus: ""
   property string lastError: ""
   property var _readQueue: []
@@ -66,6 +82,12 @@ Item {
   property var _actionErrorLines: []
   property int _actionOutputLines: 0
   property int _actionOutputChars: 0
+  // T2: updateCheckProcess's own output buffers (separate Process, see
+  // checkForUpdates() below).
+  property var _updateCheckLines: []
+  property var _updateCheckErrorLines: []
+  property int _updateCheckOutputLines: 0
+  property int _updateCheckOutputChars: 0
   readonly property bool busy: actionProcess.running || _actionQueue.length > 0
     || readProcess.running || _readQueue.length > 0
 
@@ -127,9 +149,13 @@ Item {
     return false
   }
 
-  function _enqueueRead(kind, command) {
+  // T2: an optional per-request timeoutSeconds (default 10, matching every
+  // pre-existing caller) -- the "packageInfo" read needs no override (it's
+  // a plain local file read), but keeping the queue itself generic avoids
+  // giving System-tab reads a second, parallel pipeline for no reason.
+  function _enqueueRead(kind, command, timeoutSeconds) {
     if (_hasRead(kind)) return
-    _readQueue = _readQueue.concat([{ kind: kind, command: command }])
+    _readQueue = _readQueue.concat([{ kind: kind, command: command, timeoutSeconds: timeoutSeconds || 10 }])
     _startNextRead()
   }
 
@@ -140,7 +166,7 @@ Item {
     _readQueue = queue
     _readKind = request.kind
     _resetReadOutput()
-    readProcess.command = _finiteCommand(request.command, 10)
+    readProcess.command = _finiteCommand(request.command, request.timeoutSeconds || 10)
     readProcess.running = true
   }
 
@@ -159,11 +185,22 @@ Item {
     _enqueueRead("dns", ["mullvad", "dns", "get"])
     _enqueueRead("antiCensorship", ["mullvad", "anti-censorship", "get"])
     _enqueueRead("excludedPids", ["mullvad", "split-tunnel", "list"])
+    // T2: cheap/local System-tab reads run on every refreshAll() (install
+    // detection, panel open) -- NOT the network update check, which only
+    // ever runs from the hourly systemTimer or the explicit "Check now"
+    // button (checkForUpdates()). "version" queries the already-running
+    // daemon (no network of its own); "packageInfo" only reads local
+    // pacman metadata files.
+    _enqueueRead("version", ["mullvad", "version"])
+    _enqueueRead("packageInfo", [packageInfoScript])
   }
 
   function refreshStatus() {
-    if (installed) _enqueueRead("status", ["mullvad", "status", "--json"])
-    else refreshAll()
+    if (installed) {
+      _enqueueRead("status", ["mullvad", "status", "--json"])
+      // T2: cheap (local pgrep), read alongside every routine status poll.
+      _enqueueRead("daemonPid", ["pgrep", "-x", "mullvad-daemon"])
+    } else refreshAll()
   }
 
   function _applyStatus(raw) {
@@ -218,11 +255,23 @@ Item {
         state = "unavailable"
         statusText = "Mullvad is not installed"
         lastError = "Mullvad CLI not found. Install Mullvad VPN, then refresh."
+        cliVersion = ""
         if (listenerProcess.running) listenerProcess.running = false
       } else {
         if (lastError.indexOf("Mullvad CLI not found") === 0) lastError = ""
+        cliVersion = Model.parseCliVersion(raw)
         _enqueueAuthoritativeReads()
       }
+      return
+    }
+
+    // T2: daemonPid must reset to 0 when pgrep finds nothing (exitCode !==
+    // 0), unlike every other kind below where a non-zero exit means "leave
+    // the last known value alone" -- handled before the generic guard for
+    // the same reason "account" is (a query that legitimately reports
+    // "not found" via its own exit code, not a transient failure to hide).
+    if (kind === "daemonPid") {
+      daemonPid = exitCode === 0 ? (parseInt(String(raw || "").split("\n")[0], 10) || 0) : 0
       return
     }
 
@@ -327,6 +376,13 @@ Item {
         }
       } else if (kind === "excludedPids") {
         excludedPids = Model.parseExcludedPids(raw)
+      } else if (kind === "version") {
+        var daemonInfo = Model.parseDaemonVersion(raw)
+        daemonVersion = String(daemonInfo.version || "")
+        daemonSupported = daemonInfo.supported === true ? true : daemonInfo.supported === false ? false : null
+        suggestedUpgrade = String(daemonInfo.suggestedUpgrade || "")
+      } else if (kind === "packageInfo") {
+        packages = Model.parsePackageInfo(raw)
       }
     } catch (e) {
       lastError = _shortError(e, "Could not parse Mullvad " + kind)
@@ -529,6 +585,46 @@ Item {
     _runAction("excludedPidDelete", { pid: pid }, "Removing excluded process")
   }
 
+  // T2 (16-s8-feedback-spec.md): the network update check. Deliberately its
+  // OWN Process (updateCheckProcess below), not the shared readProcess/
+  // _readQueue pipeline every other read uses -- `checkupdates` can block
+  // for up to its own 120s timeout, and readProcess/_readQueue feed
+  // `busy`, which gates connectTunnel()/disconnectTunnel()/toggleTunnel().
+  // Routing an hourly background network check through that same queue
+  // would make a slow/hung update check block the user from toggling the
+  // VPN for up to two minutes -- a regression this pass does not want to
+  // introduce. Debounced: a call is ignored while one is already running,
+  // or within 60s of the last one that actually completed (updateCheckedAt
+  // only advances on completion, success or failure -- see below).
+  function checkForUpdates() {
+    if (updateCheckStatus !== "checking" && !updateCheckProcess.running
+        && (updateCheckedAt === 0 || Date.now() - updateCheckedAt >= 60000)) {
+      updateCheckStatus = "checking"
+      _resetUpdateCheckOutput()
+      updateCheckProcess.command = _finiteCommand([updateCheckScript], 130)
+      updateCheckProcess.running = true
+    }
+    return updateCheckStatus
+  }
+
+  function _resetUpdateCheckOutput() {
+    _updateCheckLines = []
+    _updateCheckErrorLines = []
+    _updateCheckOutputLines = 0
+    _updateCheckOutputChars = 0
+  }
+
+  function _appendUpdateCheckOutput(line, errorStream) {
+    if (_updateCheckOutputLines >= finiteOutputLines || _updateCheckOutputChars >= finiteOutputChars) return
+    var value = _redact(line)
+    var remaining = finiteOutputChars - _updateCheckOutputChars
+    if (value.length > remaining) value = value.slice(0, remaining)
+    if (errorStream) _updateCheckErrorLines.push(value)
+    else _updateCheckLines.push(value)
+    _updateCheckOutputLines++
+    _updateCheckOutputChars += value.length + 1
+  }
+
   // F6 (D9 fix): interval assigned imperatively, never live-bound. A live
   // `interval: expr` binding restarts the countdown on any change to the
   // expression's inputs; this timer only needs to react to actual
@@ -566,6 +662,25 @@ Item {
     interval: 1000
     repeat: false
     onTriggered: root._enqueueRead("excludedPids", ["mullvad", "split-tunnel", "list"])
+  }
+
+  // T2: the human's rule (15-humand-feedback.md) -- "low refresh, at most
+  // once every hour[)". Imperative interval, same reasoning as pollTimer
+  // (F6/D9): never a live `interval:` binding. First run at 60s after
+  // service start (fast enough to populate the System tab without a
+  // network check on every single startup being the FIRST thing that
+  // happens), then every hour. checkForUpdates() is itself debounced, so
+  // this is also what the tab's "Check now" button calls directly.
+  Timer {
+    id: systemTimer
+    repeat: true
+    running: true
+    onTriggered: {
+      if (interval !== 3600000) interval = 3600000
+      root._enqueueRead("packageInfo", [root.packageInfoScript])
+      root.checkForUpdates()
+    }
+    Component.onCompleted: interval = 60000
   }
 
   Process {
@@ -667,6 +782,39 @@ Item {
       }
       root.refreshAll()
       if (exitCode === 0) Qt.callLater(root._startNextAction)
+    }
+  }
+
+  // T2: deliberately separate from readProcess/actionProcess -- see the
+  // comment on checkForUpdates() above. Not counted in `busy`.
+  Process {
+    id: updateCheckProcess
+    command: []
+    running: false
+    stdout: SplitParser {
+      onRead: function(line) { root._appendUpdateCheckOutput(line, false) }
+    }
+    stderr: SplitParser {
+      onRead: function(line) { root._appendUpdateCheckOutput(line, true) }
+    }
+    onExited: function(exitCode) {
+      var raw = root._updateCheckLines.join("\n")
+      if (exitCode === 0) {
+        try {
+          root.updateTargets = Model.parseUpdateCheck(raw)
+        } catch (e) {
+          root.updateTargets = []
+        }
+        root.updateAvailable = root.updateTargets.length > 0
+        root.updateCheckStatus = "ok"
+        root.updateCheckedAt = Date.now()
+      } else {
+        // scripts/mullvad-update-check exit 3 (offline/lock/timeout): "does
+        // nothing" per the human's rule -- only the status flips so the UI
+        // can say so; updateAvailable/updateTargets/updateCheckedAt are
+        // left exactly as they were.
+        root.updateCheckStatus = "unavailable"
+      }
     }
   }
 }

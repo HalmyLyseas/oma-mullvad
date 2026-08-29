@@ -1,0 +1,30 @@
+%NAME%
+mullvad-vpn-daemon
+
+%VERSION%
+2026.4-1
+
+%BASE%
+mullvad-vpn
+
+%DESC%
+Mullvad VPN client (daemon and CLI)
+
+%URL%
+https://www.mullvad.net
+
+%ARCH%
+x86_64
+
+%BUILDDATE%
+1786971553
+
+%INSTALLDATE%
+1787763238
+
+%PACKAGER%
+Peter Jung <ptr1337@archlinux.org>
+
+%SIZE%
+34284346
+

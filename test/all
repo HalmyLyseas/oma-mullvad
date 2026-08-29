@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # test/all -- runs every test suite in this repo: Node unit tests (Model.js,
-# bounded-command guard, QML Text-sink audit), then the read-only Mullvad CLI
-# contract check. Exits non-zero if any suite fails.
+# bounded-command guard, QML Text-sink audit), the scripts.test.sh suite
+# (mullvad-package-info / mullvad-update-check against fixtures/mocks), then
+# the read-only Mullvad CLI contract check. Exits non-zero if any suite fails.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -9,6 +10,11 @@ overall=0
 
 echo "== node --test (Model.js, bounded-command, QML Text sinks) =="
 node --test "$SCRIPT_DIR"/*.test.js
+if [[ $? -ne 0 ]]; then overall=1; fi
+
+echo
+echo "== scripts (bash, checkupdates shadowed by test/mocks/checkupdates) =="
+bash "$SCRIPT_DIR/scripts.test.sh"
 if [[ $? -ne 0 ]]; then overall=1; fi
 
 echo

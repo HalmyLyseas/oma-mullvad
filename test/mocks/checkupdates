@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# test/mocks/checkupdates -- PATH-shadowing mock of pacman-contrib's
+# checkupdates for scripts/mullvad-update-check tests. Steered by
+# $MOCK_MODE (default "updates"):
+#   updates -- a mix of packages including both mullvad ones, exit 0
+#   none    -- no stdout at all, exit 2 (checkupdates' "nothing to update")
+#   offline -- a sync error on stderr, exit 1 (checkupdates' "could not check")
+#   hang    -- sleeps past a short timeout so the wrapper's own `timeout`
+#              fires 124 (tests set MULLVAD_UPDATE_CHECK_TIMEOUT low)
+set -uo pipefail
+MODE="${MOCK_MODE:-updates}"
+
+case "$MODE" in
+  updates)
+    echo "openai-codex-desktop 26.820.71523-1 -> 26.820.80927-1"
+    echo "mullvad-vpn 2026.3-1 -> 2026.4-1"
+    echo "mullvad-vpn-daemon 2026.3-1 -> 2026.4-1"
+    exit 0
+    ;;
+  none)
+    exit 2
+    ;;
+  offline)
+    echo "error: failed to synchronize all databases" >&2
+    exit 1
+    ;;
+  hang)
+    sleep 5
+    exit 0
+    ;;
+  *)
+    echo "checkupdates mock: unknown MOCK_MODE=$MODE" >&2
+    exit 1
+    ;;
+esac

@@ -32,6 +32,10 @@ Panel {
   property var recentLocations: []
   property var pendingConfirmation: null
   property bool syncingSettings: false
+  // T2: reused github-status idea -- relative-time labels on the System tab
+  // read this instead of Date.now() so a panel left open keeps counting up
+  // ("just now" -> "5m ago") while visible.
+  property double nowMs: Date.now()
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
@@ -259,6 +263,31 @@ Panel {
       ? String(constraint.hostname || "") : ""
   }
 
+  // T2: System tab -- UPDATES status line text, per 16-s8-feedback-spec.md.
+  function updateTargetsText() {
+    var targets = arrayFrom(service.updateTargets)
+    var parts = []
+    for (var i = 0; i < targets.length; i++) {
+      var target = targets[i] || {}
+      parts.push(Model.plainText(target.name, 64) + " " + Model.plainText(target.current, 64)
+        + " -> " + Model.plainText(target.latest, 64))
+    }
+    return parts.join(", ")
+  }
+
+  function updatesStatusText() {
+    var status = service.updateCheckStatus
+    if (status === "checking") return "Checking for updates…"
+    if (status === "unavailable")
+      return "Could not check (offline?) · last result "
+        + (service.updateCheckedAt > 0 ? Model.relativeTimeMs(service.updateCheckedAt, root.nowMs) : "never")
+    if (status === "ok") {
+      if (service.updateAvailable) return "Update available: " + updateTargetsText()
+      return "Up to date · checked " + Model.relativeTimeMs(service.updateCheckedAt, root.nowMs)
+    }
+    return "Never checked for updates"
+  }
+
   function dnsFlags(changed, value) {
     var current = service.dns || ({})
     var flags = {
@@ -285,11 +314,11 @@ Panel {
   }
 
   function showPage(index) {
-    pageIndex = Math.max(0, Math.min(3, index))
+    pageIndex = Math.max(0, Math.min(4, index))
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
   }
 
-  function movePage(delta) { showPage((pageIndex + delta + 4) % 4) }
+  function movePage(delta) { showPage((pageIndex + delta + 5) % 5) }
 
   function moveScroll(delta) {
     if (!pageFlick) return
@@ -339,12 +368,23 @@ Panel {
 
   onSettingsChanged: syncInlineSettings()
   onOpenedChanged: if (opened) {
+    root.nowMs = Date.now()
     pageFlick.contentY = 0
     service.refreshAll()
     if (bar && bar.shell && bar.shell.appLibrary && bar.shell.appLibrary.refreshIcons) bar.shell.appLibrary.refreshIcons()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
   Component.onCompleted: syncInlineSettings()
+
+  // T2: relative-time labels on the System tab keep counting up live while
+  // the panel is open (github-status precedent), without waking up while
+  // closed.
+  Timer {
+    interval: 30000
+    running: root.opened
+    repeat: true
+    onTriggered: root.nowMs = Date.now()
+  }
 
   IpcHandler {
     target: root.ipcTarget
@@ -361,6 +401,25 @@ Panel {
     function nextFavorite(): string { return root.cycleFavorite(1) }
     function previousFavorite(): string { return root.cycleFavorite(-1) }
     function favorite(index: string): string { return root.chooseFavorite(index) }
+    // T2: checkUpdates() triggers the debounced hourly-network-check path
+    // and returns the resulting status, scriptable for verification.
+    // systemInfo() returns the full System-tab property set as JSON.
+    function checkUpdates(): string { return service.checkForUpdates() }
+    function systemInfo(): string {
+      return JSON.stringify({
+        cliVersion: service.cliVersion,
+        daemonVersion: service.daemonVersion,
+        daemonSupported: service.daemonSupported,
+        suggestedUpgrade: service.suggestedUpgrade,
+        daemonRunning: service.daemonRunning,
+        daemonPid: service.daemonPid,
+        packages: service.packages,
+        updateCheckStatus: service.updateCheckStatus,
+        updateCheckedAt: service.updateCheckedAt,
+        updateAvailable: service.updateAvailable,
+        updateTargets: service.updateTargets
+      })
+    }
   }
 
   KeyboardPanel {
@@ -402,6 +461,7 @@ Panel {
         else if (text === "2") root.showPage(1)
         else if (text === "3") root.showPage(2)
         else if (text === "4") root.showPage(3)
+        else if (text === "5") root.showPage(4)
         else if (text === "r" || text === "R") service.refreshAll()
         else if (text === "t" || text === "T") service.toggleTunnel()
         else if (text === "n" || text === "N") root.cycleFavorite(1)
@@ -418,7 +478,7 @@ Panel {
           spacing: Style.spacing.xs
 
           Repeater {
-            model: ["Overview", "Locations", "Advanced", "Excluded"]
+            model: ["Overview", "Locations", "Advanced", "Excluded", "System"]
             Button {
               required property string modelData
               required property int index
@@ -456,7 +516,8 @@ Panel {
             width: pageFlick.width
             sourceComponent: root.pageIndex === 0 ? overviewPage
               : root.pageIndex === 1 ? locationsPage
-              : root.pageIndex === 2 ? advancedPage : excludedPage
+              : root.pageIndex === 2 ? advancedPage
+              : root.pageIndex === 3 ? excludedPage : systemPage
           }
         }
       }
@@ -829,7 +890,7 @@ Panel {
       Text {
         textFormat: Text.PlainText
         width: parent.width
-        text: "Keys: 1–4 pages · T tunnel · R refresh · N/P favourites · H/L pages · J/K scroll"
+        text: "Keys: 1–5 pages · T tunnel · R refresh · N/P favourites · H/L pages · J/K scroll"
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -1459,6 +1520,156 @@ Panel {
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         horizontalAlignment: Text.AlignHCenter
+      }
+    }
+  }
+
+  // T2 (16-s8-feedback-spec.md): 5th page -- Mullvad binaries/daemon/updates.
+  Component {
+    id: systemPage
+
+    Column {
+      id: systemColumn
+      width: pageFlick.width
+      spacing: Style.space(12)
+      Keys.onEscapePressed: root.close()
+
+      PanelHero {
+        width: parent.width
+        title: "Mullvad system"
+        meta: "Binaries, daemon, and package updates"
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        iconComponent: Component {
+          // "system" matches no ThemeIcon state branch, so only the base
+          // shield outline renders (no checkmark/slash/dots overlay) --
+          // deliberately the "plain shield" the spec asks for, with zero
+          // ThemeIcon.qml changes needed.
+          ThemeIcon { iconSize: Style.font.display; state: "system"; color: root.foreground; urgentColor: root.urgent }
+        }
+      }
+
+      PanelSeparator { foreground: root.foreground }
+      PanelSectionHeader { text: "BINARIES"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: "CLI: " + (service.cliVersion !== "" ? Model.plainText(service.cliVersion, 64) : "unknown")
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        elide: Text.ElideRight
+      }
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: "Daemon: " + (service.daemonVersion !== "" ? Model.plainText(service.daemonVersion, 64) : "unknown")
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        elide: Text.ElideRight
+      }
+      Text {
+        textFormat: Text.PlainText
+        visible: service.daemonVersion !== ""
+        width: parent.width
+        text: "Supported by Mullvad: " + (service.daemonSupported === true ? "yes" : service.daemonSupported === false ? "no" : "unknown")
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        elide: Text.ElideRight
+      }
+      Text {
+        textFormat: Text.PlainText
+        visible: service.suggestedUpgrade !== ""
+        width: parent.width
+        text: "Mullvad suggests upgrading to " + Model.plainText(service.suggestedUpgrade, 64)
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        elide: Text.ElideRight
+      }
+
+      PanelSeparator { foreground: root.foreground }
+      PanelSectionHeader { text: "PACKAGES"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+      Text {
+        textFormat: Text.PlainText
+        visible: service.packages.length === 0
+        width: parent.width
+        text: "No package information available."
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        horizontalAlignment: Text.AlignHCenter
+      }
+
+      Column {
+        visible: service.packages.length > 0
+        width: parent.width
+        spacing: Style.space(4)
+        Repeater {
+          model: service.packages
+          Text {
+            required property var modelData
+            textFormat: Text.PlainText
+            width: parent.width
+            text: Model.plainText(modelData.name, 64) + "  " + Model.plainText(modelData.version, 64)
+              + (modelData.installedAt ? "  ·  installed " + Qt.formatDateTime(new Date(modelData.installedAt), "yyyy-MM-dd HH:mm") : "")
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideRight
+          }
+        }
+      }
+
+      PanelSeparator { foreground: root.foreground }
+      PanelSectionHeader { text: "DAEMON"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: service.daemonRunning ? "Running (pid " + service.daemonPid + ")" : "Unavailable"
+        color: service.daemonRunning ? root.foreground : root.urgent
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        elide: Text.ElideRight
+      }
+
+      PanelSeparator { foreground: root.foreground }
+      PanelSectionHeader { text: "UPDATES"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: root.updatesStatusText()
+        color: service.updateAvailable ? root.accent : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
+      }
+
+      RowLayout {
+        width: parent.width
+        spacing: Style.space(8)
+
+        Button {
+          text: "Check now"
+          bordered: true
+          focusable: true
+          enabled: service.updateCheckStatus !== "checking"
+          foreground: root.foreground
+          onClicked: service.checkForUpdates()
+        }
+        Button {
+          text: "Open the mullvad-vpn package page"
+          bordered: true
+          focusable: true
+          foreground: root.foreground
+          onClicked: Quickshell.execDetached(["xdg-open", Model.ARCH_PACKAGE_URL])
+        }
       }
     }
   }

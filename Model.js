@@ -566,6 +566,114 @@ function parseExcludedPids(raw) {
     return result;
 }
 
+// T2 (16-s8-feedback-spec.md): System-tab parsers. All bounded, all
+// tolerant of missing/malformed input (return empty/neutral values rather
+// than throw), matching the rest of this file's style.
+
+var SYSTEM_PACKAGE_NAMES = { "mullvad-vpn": true, "mullvad-vpn-daemon": true };
+
+// Parses the existing "probe" read's own stdout (`mullvad --version` ->
+// "mullvad-cli 2026.4").
+function parseCliVersion(raw) {
+    var match = boundedInput(raw, 256).match(/mullvad-cli\s+(\S+)/i);
+    return match ? plainText(match[1], 32) : "";
+}
+
+// Parses `mullvad version` (queries the running daemon -- NOT the same as
+// `mullvad-daemon --version`), a 3-line report:
+//   Current version       : 2026.4
+//   Is supported          : true
+//   Suggested upgrade     : none
+function parseDaemonVersion(raw) {
+    var input = boundedInput(raw, 4096);
+    var version = input.match(/^\s*Current version\s*:\s*(.+?)\s*$/im);
+    var supported = input.match(/^\s*Is supported\s*:\s*(\S+)/im);
+    var upgrade = input.match(/^\s*Suggested upgrade\s*:\s*(.+?)\s*$/im);
+    var upgradeValue = upgrade ? plainText(upgrade[1], 64) : "";
+    if (/^none$/i.test(upgradeValue))
+        upgradeValue = "";
+    return {
+        version: version ? plainText(version[1], 32) : "",
+        supported: supported ? /^(true|yes)$/i.test(supported[1]) : null,
+        suggestedUpgrade: upgradeValue
+    };
+}
+
+function epochSecondsToIso(value) {
+    var seconds = Number(value);
+    if (!isFinite(seconds) || seconds <= 0)
+        return "";
+    var date = new Date(seconds * 1000);
+    return isNaN(date.getTime()) ? "" : date.toISOString();
+}
+
+// Parses scripts/mullvad-package-info's `name\tversion\tinstalldate\tbuilddate`
+// lines. Only the two known package names are ever accepted (an allowlist,
+// not just a shape check) -- this feeds directly into the System tab.
+function parsePackageInfo(raw) {
+    var result = [];
+    var lines = boundedLines(raw, 16, 8192);
+    for (var i = 0; i < lines.length && result.length < 8; ++i) {
+        var fields = lines[i].split("\t");
+        if (fields.length < 4)
+            continue;
+        var name = text(fields[0]).trim();
+        if (!SYSTEM_PACKAGE_NAMES[name])
+            continue;
+        var version = plainText(fields[1], 64);
+        if (!version)
+            continue;
+        result.push({
+            name: name,
+            version: version,
+            installedAt: epochSecondsToIso(fields[2]),
+            buildAt: epochSecondsToIso(fields[3])
+        });
+    }
+    return result;
+}
+
+// Parses scripts/mullvad-update-check's `name\tcurrent\tlatest` lines.
+function parseUpdateCheck(raw) {
+    var result = [];
+    var lines = boundedLines(raw, 16, 8192);
+    for (var i = 0; i < lines.length && result.length < 8; ++i) {
+        var fields = lines[i].split("\t");
+        if (fields.length < 3)
+            continue;
+        var name = text(fields[0]).trim();
+        if (!SYSTEM_PACKAGE_NAMES[name])
+            continue;
+        var current = plainText(fields[1], 64);
+        var latest = plainText(fields[2], 64);
+        if (!current || !latest)
+            continue;
+        result.push({ name: name, current: current, latest: latest });
+    }
+    return result;
+}
+
+// Reused github-status idea: a Panel Timer refreshes `nowMs` every 30s while
+// open so a relative-time label keeps counting up live. Takes plain epoch ms
+// (this file's updateCheckedAt is already `Date.now()`, not an ISO string).
+function relativeTimeMs(thenMs, nowMs) {
+    var then = Number(thenMs);
+    if (!isFinite(then) || then <= 0)
+        return "never";
+    var now = isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+    var diffSec = Math.max(0, Math.floor((now - then) / 1000));
+    if (diffSec < 60)
+        return "just now";
+    var diffMin = Math.floor(diffSec / 60);
+    if (diffMin < 60)
+        return diffMin + "m ago";
+    var diffHour = Math.floor(diffMin / 60);
+    if (diffHour < 24)
+        return diffHour + "h ago";
+    var diffDay = Math.floor(diffHour / 24);
+    return diffDay + "d ago";
+}
+
 function validatePort(value) {
     if (!/^\d+$/.test(text(value)))
         return false;
@@ -786,6 +894,11 @@ var api = {
     parseDns: parseDns,
     parseAntiCensorship: parseAntiCensorship,
     parseExcludedPids: parseExcludedPids,
+    parseCliVersion: parseCliVersion,
+    parseDaemonVersion: parseDaemonVersion,
+    parsePackageInfo: parsePackageInfo,
+    parseUpdateCheck: parseUpdateCheck,
+    relativeTimeMs: relativeTimeMs,
     validatePort: validatePort,
     validateFavoriteIndex: validateFavoriteIndex,
     validateDnsAddress: validateDnsAddress,

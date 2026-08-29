@@ -1,0 +1,42 @@
+#!/bin/bash
+# scripts/mullvad-update-check -- read-only wrapper around `checkupdates`
+# (pacman-contrib; the same tool Omarchy's own update indicator uses:
+# /usr/share/omarchy/bin/omarchy-update-available) that reports ONLY the
+# two Mullvad packages, never any other package's update, and never invokes
+# a package manager to change anything -- checkupdates itself never
+# modifies the local pacman database, only a private sync-db copy.
+#
+# Exit codes (matching checkupdates' own contract, per 16-s8-feedback-spec.md
+# PM research): checkupdates exits 2 for "no updates at all" (not an error --
+# print nothing, exit 0 here too); exits 0 with output for "updates found"
+# (filter to the two Mullvad names, exit 0); exits 1 for offline/lock/error,
+# or our own `timeout` returns 124 -- both mean "could not check", so this
+# prints nothing and exits 3, letting the caller tell those two apart from
+# "checked, nothing to report".
+#
+# MULLVAD_UPDATE_CHECK_TIMEOUT overrides the internal timeout (default 120s)
+# for tests; the caller (Service.qml) additionally wraps this whole script
+# in its own longer bounded-command deadline as a backstop.
+set -uo pipefail
+
+timeout_seconds="${MULLVAD_UPDATE_CHECK_TIMEOUT:-120}"
+
+output="$(timeout "$timeout_seconds" checkupdates --nocolor 2>/dev/null)"
+status=$?
+
+case "$status" in
+  2)
+    exit 0
+    ;;
+  0)
+    ;;
+  *)
+    # 1 = offline/db-lock/error, 124 = our own timeout.
+    exit 3
+    ;;
+esac
+
+echo "$output" | awk '
+  $1 == "mullvad-vpn" || $1 == "mullvad-vpn-daemon" { print $1 "\t" $2 "\t" $4 }
+'
+exit 0

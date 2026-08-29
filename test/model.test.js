@@ -205,6 +205,65 @@ lwo settings: any port`);
     ]);
 });
 
+test("T2: parseCliVersion/parseDaemonVersion match real mullvad CLI output shapes", () => {
+    // Recorded live on this box (16-s8-feedback-spec.md PM research):
+    // `mullvad --version` -> "mullvad-cli 2026.4"; `mullvad version` ->
+    // the 3-line "Current version / Is supported / Suggested upgrade"
+    // report (with real-world padding before the colon).
+    assert.equal(Model.parseCliVersion("mullvad-cli 2026.4\n"), "2026.4");
+    assert.equal(Model.parseCliVersion(""), "");
+
+    const daemon = Model.parseDaemonVersion(
+        "Current version       : 2026.4\n" +
+        "Is supported          : true\n" +
+        "Suggested upgrade     : none\n");
+    assert.deepEqual(daemon, { version: "2026.4", supported: true, suggestedUpgrade: "" });
+
+    const outdated = Model.parseDaemonVersion(
+        "Current version: 2026.3\nIs supported: false\nSuggested upgrade: 2026.4\n");
+    assert.deepEqual(outdated, { version: "2026.3", supported: false, suggestedUpgrade: "2026.4" });
+
+    assert.equal(Model.parseDaemonVersion("").supported, null);
+});
+
+test("T2: parsePackageInfo only accepts the two known Mullvad package names, bounds fields", () => {
+    const packages = Model.parsePackageInfo(
+        "mullvad-vpn\t2026.4-1\t1787763238\t1786971553\n" +
+        "mullvad-vpn-daemon\t2026.4-1\t1787763238\t1786971553\n" +
+        "some-other-pkg\t9.9-9\t1\t1\n");
+    assert.equal(packages.length, 2);
+    assert.equal(packages[0].name, "mullvad-vpn");
+    assert.equal(packages[0].version, "2026.4-1");
+    assert.equal(packages[0].installedAt, new Date(1787763238 * 1000).toISOString());
+    assert.equal(packages[0].buildAt, new Date(1786971553 * 1000).toISOString());
+    assert.equal(packages[1].name, "mullvad-vpn-daemon");
+
+    // Missing/zero dates degrade to "" rather than an Invalid Date string.
+    assert.equal(Model.parsePackageInfo("mullvad-vpn\t2026.4-1\t0\t0\n")[0].installedAt, "");
+    assert.equal(Model.parsePackageInfo("").length, 0);
+    assert.equal(Model.parsePackageInfo("mullvad-vpn\tonly-two-fields\n").length, 0);
+});
+
+test("T2: parseUpdateCheck filters to the allowlisted package names only", () => {
+    const targets = Model.parseUpdateCheck(
+        "openai-codex-desktop\t26.820.71523-1\t26.820.80927-1\n" +
+        "mullvad-vpn\t2026.3-1\t2026.4-1\n" +
+        "mullvad-vpn-daemon\t2026.3-1\t2026.4-1\n");
+    assert.equal(targets.length, 2);
+    assert.deepEqual(targets[0], { name: "mullvad-vpn", current: "2026.3-1", latest: "2026.4-1" });
+    assert.equal(Model.parseUpdateCheck("").length, 0);
+    assert.equal(Model.parseUpdateCheck("openai-codex-desktop\t1\t2\n").length, 0);
+});
+
+test("T2: relativeTimeMs renders a live-countable label or \"never\"", () => {
+    const now = Date.parse("2026-08-29T12:00:00Z");
+    assert.equal(Model.relativeTimeMs(0, now), "never");
+    assert.equal(Model.relativeTimeMs(now - 5000, now), "just now");
+    assert.equal(Model.relativeTimeMs(now - 5 * 60000, now), "5m ago");
+    assert.equal(Model.relativeTimeMs(now - 3 * 3600000, now), "3h ago");
+    assert.equal(Model.relativeTimeMs(now - 2 * 86400000, now), "2d ago");
+});
+
 test("T1: the safe Mullvad package-page URL is a fixed archlinux.org extra-repo link", () => {
     assert.equal(Model.ARCH_PACKAGE_URL, "https://archlinux.org/packages/extra/x86_64/mullvad-vpn/");
     assert.match(Model.ARCH_PACKAGE_URL, /^https:\/\/archlinux\.org\//);
