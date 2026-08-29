@@ -200,6 +200,56 @@ lwo settings: any port`);
         { pid: 1234, command: "/usr/bin/firefox" },
         { pid: 5678, command: "/opt/App/app --flag" }
     ]);
+
+    // The real CLI prints bare PIDs, one per line, with no command text.
+    assert.deepEqual(Model.parseExcludedPids("Excluded PIDs:\n1234\n5678\n"), [
+        { pid: 1234, command: "" },
+        { pid: 5678, command: "" }
+    ]);
+});
+
+test("parseProcessTable and groupExcludedProcesses fold a Chromium launch into one row", () => {
+    const mainPid = 1197192, crashpadPid = 1197196;
+    const childPids = [1197202, 1197210, 1197218, 1197226, 1197234, 1197242,
+        1197250, 1197258, 1197266, 1197274, 1197282, 1197290];
+    const mainUnit = "app-org.chromium.Chromium-1197192.scope";
+    const helperUnit = "app-Hyprland-gtk\\x2dlaunch-7f206263.scope";
+    const lines = [
+        `${mainPid}    1626 ${mainUnit} chromium`,
+        `${crashpadPid}    1626 ${helperUnit} chrome_crashpad`
+    ].concat(childPids.map(pid => `${pid} ${mainPid} ${helperUnit} chromium`));
+
+    const procs = Model.parseProcessTable(lines.join("\n"));
+    assert.equal(procs.length, 14);
+    assert.deepEqual(procs[0], { pid: mainPid, ppid: 1626, unit: mainUnit, comm: "chromium" });
+
+    const groups = Model.groupExcludedProcesses(procs, []);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].count, 14);
+    assert.equal(groups[0].rootPid, mainPid);
+    assert.equal(groups[0].label, "chromium");
+    assert.deepEqual(groups[0].pids, [mainPid, crashpadPid].concat(childPids).sort((a, b) => a - b));
+
+    // An unrelated process shares no ppid link or unit with the set above --
+    // it stays its own group.
+    const unrelated = { pid: 2000000, ppid: 1, unit: "", comm: "foo" };
+    assert.equal(Model.groupExcludedProcesses(procs.concat([unrelated]), []).length, 2);
+
+    // An `apps` label match (from the Panel's recent-apps list) wins over
+    // the root process's own comm.
+    const labelled = Model.groupExcludedProcesses(procs, [{ name: "Chromium", execBase: "chromium" }]);
+    assert.equal(labelled[0].label, "Chromium");
+});
+
+test("groupExcludedProcesses groups by ppid alone when neither process has a unit", () => {
+    const procs = [
+        { pid: 5000, ppid: 1, unit: "", comm: "foo" },
+        { pid: 5001, ppid: 5000, unit: "", comm: "foo-helper" }
+    ];
+    const groups = Model.groupExcludedProcesses(procs, []);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].rootPid, 5000);
+    assert.deepEqual(groups[0].pids, [5000, 5001]);
 });
 
 test("T2: parseCliVersion/parseDaemonVersion match real mullvad CLI output shapes", () => {

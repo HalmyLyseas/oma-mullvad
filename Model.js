@@ -578,11 +578,129 @@ function parseExcludedPids(raw) {
     var result = [];
     var lines = boundedLines(raw, MAX_INPUT_LINES, MAX_INPUT_CHARS);
     for (var i = 0; i < lines.length && result.length < MAX_EXCLUDED_PIDS; ++i) {
-        var match = lines[i].match(/^\s*(\d+)\s*(?::|\s)\s*(.*?)\s*$/);
-        var pid = match ? Number(match[1]) : 0;
-        if (match && pid >= 1 && pid <= 2147483647)
-            result.push({ pid: pid, command: plainText(match[2], 512) });
+        var line = lines[i];
+        var match = line.match(/^\s*(\d+)\s*(?::|\s)\s*(.*?)\s*$/);
+        // The real CLI prints bare PIDs, one per line, with no trailing
+        // command text at all -- fall back to a plain-integer line.
+        var bare = !match && line.match(/^\s*(\d+)\s*$/);
+        var pid = match ? Number(match[1]) : bare ? Number(bare[1]) : 0;
+        if ((match || bare) && pid >= 1 && pid <= 2147483647)
+            result.push({ pid: pid, command: match ? plainText(match[2], 512) : "" });
     }
+    return result;
+}
+
+// `ps -o pid=,ppid=,uunit=,comm=`: one row per process, whitespace-separated.
+// "-" (ps's placeholder for "no user unit") normalizes to "" so unrelated
+// headless processes never collide on a fake shared unit.
+function parseProcessTable(raw) {
+    var result = [];
+    var lines = boundedLines(raw, MAX_INPUT_LINES, MAX_INPUT_CHARS);
+    for (var i = 0; i < lines.length && result.length < MAX_EXCLUDED_PIDS; ++i) {
+        var fields = lines[i].trim().split(/\s+/);
+        if (fields.length < 4 || !/^\d+$/.test(fields[0]) || !/^\d+$/.test(fields[1]))
+            continue;
+        var pid = Number(fields[0]);
+        var ppid = Number(fields[1]);
+        if (pid < 1 || pid > 2147483647 || ppid < 0 || ppid > 2147483647)
+            continue;
+        var unit = fields[2] === "-" ? "" : plainText(fields[2], 128);
+        result.push({ pid: pid, ppid: ppid, unit: unit, comm: plainText(fields.slice(3).join(" "), 64) });
+    }
+    return result;
+}
+
+function _findGroupRoot(parent, i) {
+    while (parent[i] !== i) {
+        parent[i] = parent[parent[i]];
+        i = parent[i];
+    }
+    return i;
+}
+
+function _unionGroups(parent, a, b) {
+    var rootA = _findGroupRoot(parent, a);
+    var rootB = _findGroupRoot(parent, b);
+    if (rootA !== rootB) parent[rootA] = rootB;
+}
+
+// Lowest-pid member whose ppid is not itself a PID in the excluded set --
+// the process that re-scoped/launched the rest, not necessarily the
+// numerically-first member of the group.
+function _groupRootPid(members, procs, pidIndex) {
+    var candidates = [];
+    for (var i = 0; i < members.length; ++i) {
+        var proc = procs[members[i]];
+        if (!pidIndex.hasOwnProperty(String(proc.ppid))) candidates.push(proc.pid);
+    }
+    if (!candidates.length)
+        candidates = members.map(function(idx) { return procs[idx].pid; });
+    return Math.min.apply(null, candidates);
+}
+
+// First `apps` entry (Panel-supplied `{ name, execBase }`, from the
+// recent-apps desktop entries) whose execBase matches a member's comm
+// exactly or as a prefix; otherwise the root member's own comm.
+function _groupLabel(members, procs, apps, rootPid) {
+    for (var a = 0; a < apps.length; ++a) {
+        var execBase = text(apps[a] && apps[a].execBase).toLowerCase();
+        if (!execBase) continue;
+        for (var i = 0; i < members.length; ++i) {
+            var comm = text(procs[members[i]].comm).toLowerCase();
+            if (comm === execBase || comm.indexOf(execBase) === 0)
+                return plainText(apps[a].name, 128) || comm;
+        }
+    }
+    for (var i = 0; i < members.length; ++i) {
+        if (procs[members[i]].pid === rootPid)
+            return plainText(procs[members[i]].comm, 128) || "Excluded process";
+    }
+    return "Excluded process";
+}
+
+// Unions (a) ppid links within the set and (b) an identical non-empty
+// `unit` -- one launched app becomes one row even when its helper/crashpad
+// processes share neither a comm nor a scope with the main process.
+function groupExcludedProcesses(procs, apps) {
+    procs = Array.isArray(procs) ? procs : [];
+    apps = Array.isArray(apps) ? apps : [];
+    var n = procs.length;
+    var parent = [];
+    var pidIndex = {};
+    for (var i = 0; i < n; ++i) {
+        parent.push(i);
+        pidIndex[String(procs[i].pid)] = i;
+    }
+    for (var i = 0; i < n; ++i) {
+        var parentIdx = pidIndex[String(procs[i].ppid)];
+        if (parentIdx !== undefined && parentIdx !== i) _unionGroups(parent, i, parentIdx);
+    }
+    for (var i = 0; i < n; ++i) {
+        if (!procs[i].unit) continue;
+        for (var j = i + 1; j < n; ++j) {
+            if (procs[j].unit && procs[i].unit === procs[j].unit) _unionGroups(parent, i, j);
+        }
+    }
+    var byRoot = {};
+    for (var i = 0; i < n; ++i) {
+        var root = _findGroupRoot(parent, i);
+        if (!byRoot[root]) byRoot[root] = [];
+        byRoot[root].push(i);
+    }
+    var result = [];
+    Object.keys(byRoot).forEach(function(rootKey) {
+        var members = byRoot[rootKey];
+        var pids = members.map(function(idx) { return procs[idx].pid; }).sort(function(a, b) { return a - b; });
+        var rootPid = _groupRootPid(members, procs, pidIndex);
+        result.push({
+            key: String(rootPid),
+            label: _groupLabel(members, procs, apps, rootPid),
+            pids: pids,
+            rootPid: rootPid,
+            count: pids.length
+        });
+    });
+    result.sort(function(a, b) { return a.rootPid - b.rootPid; });
     return result;
 }
 
@@ -911,6 +1029,8 @@ var api = {
     parseDns: parseDns,
     parseAntiCensorship: parseAntiCensorship,
     parseExcludedPids: parseExcludedPids,
+    parseProcessTable: parseProcessTable,
+    groupExcludedProcesses: groupExcludedProcesses,
     parseCliVersion: parseCliVersion,
     parseDaemonVersion: parseDaemonVersion,
     parsePackageInfo: parsePackageInfo,
