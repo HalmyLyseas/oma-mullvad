@@ -31,7 +31,7 @@ omarchy plugin enable halmylyseas.mullvad --section right
 omarchy restart shell
 ```
 
-This plugin targets Mullvad VPN 2026.4. If Mullvad is missing, the panel can install the AUR package `mullvad-vpn-bin` after confirmation.
+Requires Mullvad VPN 2026.4 (`mullvad-vpn` from the Arch `extra` repository, or the AUR `mullvad-vpn-bin`) with the daemon running.
 
 ## Controls
 

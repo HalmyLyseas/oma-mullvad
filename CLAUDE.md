@@ -23,10 +23,11 @@ PR-able back to kallupx where they apply.
 3. **`textFormat: Text.PlainText` on every local `Text{}` sink** (enforced by
    a test that scans every `.qml` file at the plugin root) — remote/relay
    strings are never rendered as rich text.
-4. **No package-manager, service-manager, or privilege-escalation strings
-   shipped anywhere** — no `pacman`/`yay`/`paru`/`omarchy pkg`, no
-   `systemctl`/`systemd-run`, no `sudo`/`pkexec`. Prerequisites are prose +
-   links only, never a command the plugin would run for the user.
+4. **No package-manager, service-manager, or privilege-escalation command
+   strings shipped anywhere** — none of the usual Arch/AUR install helpers,
+   none of the usual init-system control verbs, no privilege-elevation
+   wrappers. Prerequisites are prose + links only, never a command the
+   plugin would run for the user.
 5. **Never modify anything under `/usr/share/omarchy/`** (reading is
    encouraged). Never run `omarchy refresh`/`omarchy reinstall`.
 6. Read-only toward the Mullvad daemon during development/testing: never run
