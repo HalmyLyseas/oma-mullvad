@@ -64,6 +64,9 @@ Item {
   property var antiCensorship: ({ mode: "auto", port: "any" })
   property var excludedPids: []
   property var excludedProcesses: []
+  // Group count alone, with no app labels -- cheap to expose here and
+  // lets a probe/test assert grouping without reaching into Model.js.
+  readonly property int excludedGroupCount: Model.groupExcludedProcesses(excludedProcesses, []).length
 
   // System tab: binaries/daemon/updates state.
   property string cliVersion: ""

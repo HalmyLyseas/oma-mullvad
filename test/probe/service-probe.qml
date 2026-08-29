@@ -179,6 +179,8 @@ ShellRoot {
       actionOverflowCount: debugProp("_actionOverflowCount"),
       readOutputChars: debugProp("_readOutputChars"),
       packagesLength: (service.packages || []).length,
+      excludedProcessesLength: (service.excludedProcesses || []).length,
+      excludedGroupCount: debugProp("excludedGroupCount"),
       updateCheckStatus: service.updateCheckStatus,
       updateTargetsLength: (service.updateTargets || []).length,
       updateCheckWatchdogFiredCount: debugProp("_updateCheckWatchdogFiredCount"),

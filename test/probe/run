@@ -108,6 +108,12 @@ else
     || not_ok "ok: login action completed (got: $(field "$json" actionStatus))"
   note="$(field "$json" note)"
   [[ -z "$note" ]] && ok "ok: no harness-level note/timeout" || not_ok "ok: no harness-level note/timeout (got: $note)"
+  excludedLen="$(field "$json" excludedProcessesLength)"
+  [[ "${excludedLen:-0}" -eq 14 ]] && ok "ok: excludedProcesses.length === 14 ($excludedLen)" \
+    || not_ok "ok: excludedProcesses.length === 14 (got $excludedLen)"
+  groupCount="$(field "$json" excludedGroupCount)"
+  [[ "${groupCount:-0}" -eq 1 ]] && ok "ok: excludedGroupCount === 1 ($groupCount)" \
+    || not_ok "ok: excludedGroupCount === 1 (got $groupCount)"
 fi
 check_no_orphans "$mocklog" "ok"
 
@@ -305,6 +311,7 @@ for tool in bash sh env sleep cat head awk tr mktemp rm grep sed printf pgrep ti
   real="$(command -v "$tool" 2>/dev/null)" && ln -sf "$real" "$REMOVED_PATH_DIR/$tool"
 done
 ln -sf "$PLUGIN_DIR/test/mocks/checkupdates" "$REMOVED_PATH_DIR/checkupdates"
+ln -sf "$PLUGIN_DIR/test/mocks/ps" "$REMOVED_PATH_DIR/ps"
 QS_BIN="$(command -v qs)"
 TIMEOUT_BIN="$(command -v timeout)"
 

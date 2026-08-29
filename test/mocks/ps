@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# PATH-shadowing mock of `ps` for the excluded-processes table read: the
+# fixture table for the fixture PIDs, regardless of the actual -p value.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+FIXTURES="$SCRIPT_DIR/../fixtures/cli"
+
+case "$*" in
+  "-o pid=,ppid=,uunit=,comm= -p "*) cat "$FIXTURES/ps-table.txt"; exit 0 ;;
+  *)
+    echo "ps mock: unhandled invocation: $*" >&2
+    exit 2
+    ;;
+esac
