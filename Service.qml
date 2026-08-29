@@ -88,6 +88,7 @@ Item {
   property int _actionOutputChars: 0
   // T2: updateCheckProcess's own output buffers (separate Process, see
   // checkForUpdates() below).
+  property double _updateCheckAttemptedAt: 0 // ms epoch of the last started check (debounce)
   property var _updateCheckLines: []
   property var _updateCheckErrorLines: []
   property int _updateCheckOutputLines: 0
@@ -598,11 +599,16 @@ Item {
   // would make a slow/hung update check block the user from toggling the
   // VPN for up to two minutes -- a regression this pass does not want to
   // introduce. Debounced: a call is ignored while one is already running,
-  // or within 60s of the last one that actually completed (updateCheckedAt
-  // only advances on completion, success or failure -- see below).
+  // or within 60s of the last one that was started (see the note on
+  // _updateCheckAttemptedAt vs updateCheckedAt just below).
+  // Debounced on the last ATTEMPT (`_updateCheckAttemptedAt`), not the last
+  // successful completion (`updateCheckedAt`, which only advances on exit 0
+  // so the UI can show "last known result"): an offline box therefore
+  // cannot re-run `checkupdates` more than once a minute from "Check now".
   function checkForUpdates() {
     if (updateCheckStatus !== "checking" && !updateCheckProcess.running
-        && (updateCheckedAt === 0 || Date.now() - updateCheckedAt >= 60000)) {
+        && (_updateCheckAttemptedAt === 0 || Date.now() - _updateCheckAttemptedAt >= 60000)) {
+      _updateCheckAttemptedAt = Date.now()
       updateCheckStatus = "checking"
       _resetUpdateCheckOutput()
       updateCheckProcess.command = _finiteCommand([updateCheckScript], 130)
