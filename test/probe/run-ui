@@ -117,17 +117,17 @@ check_no_orphans() {
 }
 
 # check_no_engine_errors <log> <label> -- a missing stub property/method
-# throws a TypeError/ReferenceError (a WARN "scene" line); a QML load
-# failure instead aborts the run with two "ERROR:" lines (both measured).
+# throws a TypeError/ReferenceError; a QML load failure prints "ERROR:"
+# lines. Match the colon: driver noise like VK_ERROR_… must not count.
 check_no_engine_errors() {
   local log="$1" label="$2"
   local count
-  count="$(grep -c 'TypeError\|ReferenceError\|ERROR' "$log" 2>/dev/null)"
+  count="$(grep -c 'TypeError\|ReferenceError\|ERROR:' "$log" 2>/dev/null)"
   if [[ "${count:-0}" -eq 0 ]]; then
     ok "$label: 0 TypeError/ReferenceError/QML load ERROR in the log"
   else
     not_ok "$label: 0 TypeError/ReferenceError/QML load ERROR in the log (got $count)"
-    grep 'TypeError\|ReferenceError\|ERROR' "$log" | head -5 | sed 's/^/    /'
+    grep 'TypeError\|ReferenceError\|ERROR:' "$log" | head -5 | sed 's/^/    /'
   fi
 }
 

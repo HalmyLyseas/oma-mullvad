@@ -107,6 +107,7 @@ jobs:
           WLR_RENDERER: pixman
           WLR_LIBINPUT_NO_DEVICES: "1"
           XDG_RUNTIME_DIR: /tmp/xdg-runtime
+          QT_QUICK_BACKEND: software
         run: |
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           cage -- bash test/probe/run
