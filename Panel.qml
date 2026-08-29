@@ -53,10 +53,14 @@ Panel {
   readonly property color stateColor: hostWidget && hostWidget.stateColor !== undefined ? hostWidget.stateColor : foreground
   readonly property string tunnelHint: service.active ? "Disconnect Mullvad VPN" : "Connect Mullvad VPN"
 
-  function arrayFrom(value) {
+  // `max`, when given, bounds how much of `value` is even copied -- for a
+  // persisted-settings array, Model.js's own normalizers cap at 256 anyway,
+  // so a corrupted shell.json with a huge array can't force a full copy.
+  function arrayFrom(value, max) {
     if (!value || typeof value === "string" || typeof value.length !== "number") return []
+    var limit = max ? Math.min(value.length, max) : value.length
     var result = []
-    for (var i = 0; i < value.length; i++) result.push(value[i])
+    for (var i = 0; i < limit; i++) result.push(value[i])
     return result
   }
 
@@ -467,9 +471,9 @@ Panel {
   function syncInlineSettings() {
     if (syncingSettings) return
     syncingSettings = true
-    favoriteLocations = Model.normalizeFavorites(arrayFrom(setting("favoriteLocations", [])))
-    recentLocations = Model.normalizeFavorites(arrayFrom(setting("recentLocations", []))).slice(0, 5)
-    recentExcludedApps = Model.normalizeRecentApps(arrayFrom(setting("recentExcludedApps", [])))
+    favoriteLocations = Model.normalizeFavorites(arrayFrom(setting("favoriteLocations", []), 256))
+    recentLocations = Model.normalizeFavorites(arrayFrom(setting("recentLocations", []), 256)).slice(0, 5)
+    recentExcludedApps = Model.normalizeRecentApps(arrayFrom(setting("recentExcludedApps", []), 256))
     invalidateAppRows()
     syncingSettings = false
   }

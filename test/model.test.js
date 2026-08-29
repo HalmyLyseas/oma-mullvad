@@ -334,6 +334,28 @@ test("recent excluded apps: validated desktop ids, most recent first, deduped, c
     assert.equal(Model.validateDesktopId(".hidden"), false);
 });
 
+test("normalizeFavorites/normalizeRecentApps scan at most 256 input entries, fast on huge arrays", () => {
+    const hugeInvalid = new Array(100000).fill("not-a-location");
+    const lateValid = hugeInvalid.slice();
+    lateValid[300] = "se-sto"; // past the 256-entry scan window
+    const start1 = Date.now();
+    assert.equal(Model.normalizeFavorites(lateValid).length, 0);
+    assert.ok(Date.now() - start1 < 1000, "normalizeFavorites over 100k entries must stay fast");
+    const earlyValid = hugeInvalid.slice();
+    earlyValid[10] = "se-sto";
+    assert.deepEqual(Model.normalizeFavorites(earlyValid).map(f => f.key), ["se-sto"]);
+
+    const hugeApps = new Array(100000).fill("bad id");
+    const lateValidApp = hugeApps.slice();
+    lateValidApp[300] = "org.mozilla.firefox";
+    const start2 = Date.now();
+    assert.equal(Model.normalizeRecentApps(lateValidApp).length, 0);
+    assert.ok(Date.now() - start2 < 1000, "normalizeRecentApps over 100k entries must stay fast");
+    const earlyValidApp = hugeApps.slice();
+    earlyValidApp[10] = "org.mozilla.firefox";
+    assert.deepEqual(Model.normalizeRecentApps(earlyValidApp), ["org.mozilla.firefox"]);
+});
+
 test("trust-boundary validation accepts useful values and rejects malformed input", () => {
     assert.equal(Model.validatePort(53), true);
     assert.equal(Model.validatePort(0), false);

@@ -307,7 +307,7 @@ function normalizeLocation(value) {
 function normalizeFavorites(values) {
     var result = [];
     var seen = {};
-    values = Array.isArray(values) ? values : [];
+    values = (Array.isArray(values) ? values : []).slice(0, 256);
     for (var i = 0; i < values.length && result.length < 9; ++i) {
         var favorite = normalizeLocation(values[i]);
         if (favorite && !seen[favorite.key]) {
@@ -379,7 +379,7 @@ function validateDesktopId(value) {
 function normalizeRecentApps(values) {
     var result = [];
     var seen = {};
-    values = Array.isArray(values) ? values : [];
+    values = (Array.isArray(values) ? values : []).slice(0, 256);
     for (var i = 0; i < values.length && result.length < MAX_RECENT_APPS; ++i) {
         var id = text(values[i]).trim();
         if (id.slice(-8) === ".desktop")
