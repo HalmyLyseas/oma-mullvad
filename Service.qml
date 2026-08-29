@@ -366,6 +366,12 @@ Item {
 
   function _startNextAction() {
     if (actionProcess.running || _actionQueue.length === 0) return
+    // C4 (12-fable-review.md): stop the "clear actionStatus" timer before
+    // arming the next queued action's label -- otherwise a timer started by
+    // the PREVIOUS action's completion (e.g. "Selecting location complete")
+    // can still be ticking when this one sets "Connecting…", and 2.5s later
+    // blanks actionStatus out from under a still-busy queue.
+    actionStatusTimer.stop()
     var queue = _actionQueue.slice(0)
     var action = queue.shift()
     _actionQueue = queue
@@ -417,6 +423,10 @@ Item {
     actionProcess.label = "Logging in"
     actionProcess.command = _finiteCommand(command, 20)
     actionProcess.secret = secret
+    // C4: same rationale as _startNextAction() -- login() bypasses the
+    // action queue and sets actionProcess up directly, so it needs its own
+    // stop() immediately before arming its own status text.
+    actionStatusTimer.stop()
     actionStatus = "Logging in…"
     secret = ""
     actionProcess.running = true
