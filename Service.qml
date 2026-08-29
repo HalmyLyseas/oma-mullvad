@@ -931,6 +931,13 @@ Item {
     command: []
     running: false
     stdinEnabled: true
+    // N3 (25-fable-review-s10.md): `secret` otherwise lingers in memory if
+    // the process never actually starts (e.g. the executable fails to
+    // spawn at all -- no onStarted fires, but `running` still flips back to
+    // false). Cleared here on every transition to not-running, and again in
+    // onExited below as a second, redundant guard for the same lifetime
+    // event (harmless if onRunningChanged already cleared it).
+    onRunningChanged: { if (!running) secret = "" }
     // 22-login-stdin-bug.md fix at the mechanism level: Process.write()
     // reaches the child's real stdin directly (no backgrounded shell job to
     // silently substitute /dev/null). Every action closes stdin via EOF
@@ -957,6 +964,7 @@ Item {
     onExited: function(exitCode, exitStatus) {
       actionWatchdog.stop()
       actionKillTimer.stop()
+      secret = "" // N3: redundant with onRunningChanged above, belt-and-suspenders.
       var label = actionProcess.label
       var success = false
       if (root._actionWatchdogFired) {
