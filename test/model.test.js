@@ -236,6 +236,23 @@ test("argv builder covers tunnel, relay, anti-censorship, and exclusions", () =>
     assert.throws(() => Model.argv("location", { country: "se;reboot" }), /country/);
     assert.throws(() => Model.argv("antiCensorshipPort", { mode: "udp2tcp", port: 70000 }), /port/);
     assert.throws(() => Model.argv("launchExcluded", { desktopId: "x; reboot" }), /application/);
+
+    // F4 (D5 fix): a leading "-" must never reach argv-bound values --
+    // safeArg() rejects it directly (providers is one of its callers), and
+    // launchExcluded's desktop-id regex independently requires the string
+    // to start with an alphanumeric.
+    assert.throws(() => Model.argv("providers", { providers: ["-x"] }), /provider/);
+    assert.throws(() => Model.argv("launchExcluded", { desktopId: "-firefox.desktop" }), /application/);
+    assert.throws(() => Model.argv("launchExcluded", { desktopId: ".firefox.desktop" }), /application/);
+    assert.throws(() => Model.argv("launchExcluded", { desktopId: "_firefox.desktop" }), /application/);
+    // F4: dot-separated "." / ".." segments (path-traversal-shaped) are
+    // rejected even when the string otherwise starts with an alphanumeric
+    // and would pass the base charset check.
+    assert.throws(() => Model.argv("launchExcluded", { desktopId: "org...mozilla.desktop" }), /application/);
+    assert.throws(() => Model.argv("launchExcluded", { desktopId: "org.mozilla.." }), /application/);
+    // Ordinary reverse-DNS desktop IDs (the only real-world shape) still work.
+    assert.deepEqual(Model.argv("launchExcluded", { desktopId: "org.mozilla.firefox.desktop" }),
+        ["mullvad-exclude", "uwsm-app", "--", "gtk-launch", "org.mozilla.firefox.desktop"]);
 });
 
 test("redaction removes account and token-like secrets", () => {

@@ -602,7 +602,12 @@ function validateDnsAddress(value) {
 
 function safeArg(value, label) {
     var result = text(value);
-    if (!result || result.length > 512 || /[\x00\r\n]/.test(result))
+    // F4 (D5 fix): a leading "-" would let a relay-derived/user-writable
+    // value be read as a flag by whatever argv-bound binary receives it
+    // (inert today only because the reachable binaries happen to treat an
+    // unknown flag as a no-op) -- reject it at the source instead of
+    // depending on that.
+    if (!result || result.length > 512 || /[\x00\r\n]/.test(result) || /^-/.test(result))
         throw new Error("Invalid " + label);
     return result;
 }
@@ -733,7 +738,11 @@ function argv(action, params) {
     case "excludedPidDelete": return ["mullvad", "split-tunnel", "delete", pidArg(params.pid)];
     case "launchExcluded": {
         var desktopId = safeArg(params.desktopId, "desktop application ID");
-        if (!/^[a-z0-9_.+\-]+(?:\.desktop)?$/i.test(desktopId))
+        // F4 (D5 fix): must start with an alphanumeric (no leading "-"/"."/
+        // "_"), and no dot-separated segment may be exactly "." or ".."
+        // (path-traversal-shaped segment), on top of safeArg's own
+        // leading-"-" rejection above.
+        if (!/^[a-z0-9][a-z0-9_.+\-]*(?:\.desktop)?$/i.test(desktopId) || /(^|\.)\.\.?(\.|$)/.test(desktopId))
             throw new Error("Invalid desktop application ID");
         return ["mullvad-exclude", "uwsm-app", "--", "gtk-launch", desktopId];
     }
