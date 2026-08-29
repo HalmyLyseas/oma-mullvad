@@ -6,9 +6,7 @@ import "Model.js" as Model
 Item {
   id: root
 
-  // Injected once by shell.ensureService() when this manifest declares
-  // kind "service" (unused directly here; kept for parity with the
-  // reference service pattern and any future shell-level need).
+  // Injected by shell.ensureService() (manifest kind "service"); unused here.
   property var shell: null
   property int pollInterval: 30000
   readonly property int finiteOutputLines: 4096

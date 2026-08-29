@@ -16,8 +16,8 @@ BarWidget {
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color barForeground: bar ? bar.barForeground : Color.foreground
 
-  // Moved verbatim from Panel.qml (was computed against the local `service`
-  // id there); every `service.` read becomes `svc ? svc.x : <default>`.
+  // Bar-side state derived from the service. Every read is null-guarded:
+  // the bar paints this widget before the service resolves on first load.
   readonly property string stateIcon: !svc ? "connecting"
     : svc.state === "checking" ? "connecting"
     : !svc.installed || (svc.installed && !svc.daemonRunning) || svc.state === "error" ? "error"
