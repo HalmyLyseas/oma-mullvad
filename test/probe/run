@@ -77,6 +77,16 @@ check_no_orphans() {
   fi
 }
 
+# check_exit_status <label> -- qs's own exit status used to be discarded
+# entirely, so a scenario that crashed/timed out after printing a valid
+# PROBE_RESULT line still passed every field assertion.
+check_exit_status() {
+  local label="$1" code
+  code="$(cat "$OUT_DIR/$label.exit" 2>/dev/null || echo "")"
+  [[ "$code" == "0" ]] && ok "$label: qs exited 0 (not a crash/timeout, got $code)" \
+    || not_ok "$label: qs exited 0 (not a crash/timeout, got exit code: ${code:-unknown})"
+}
+
 login_received_len_count() {
   # <mocklog> <n> -- count of "login-received-len=<n>" occurrences. No
   # `|| echo 0` fallback: grep -c already prints "0" on zero matches, and
@@ -118,6 +128,7 @@ else
     || not_ok "ok: cliVersionSupported=true (got: $(field "$json" cliVersionSupported))"
 fi
 check_no_orphans "$mocklog" "ok"
+check_exit_status "ok"
 
 echo
 echo "== untestedversion mode (S17: CLI ahead of the pinned SUPPORTED_CLI_VERSIONS list) =="
@@ -135,6 +146,7 @@ else
     || not_ok "untestedversion: cliVersionSupported=false (got: $(field "$json" cliVersionSupported))"
 fi
 check_no_orphans "$mocklog" "untestedversion"
+check_exit_status "untestedversion"
 
 echo
 echo "== fail mode =="
@@ -155,6 +167,7 @@ else
     || not_ok "fail: queue continued past the first failure (got $invocations invocations)"
 fi
 check_no_orphans "$mocklog" "fail"
+check_exit_status "fail"
 
 echo
 echo "== hang mode =="
@@ -192,6 +205,7 @@ else
   fi
 fi
 check_no_orphans "$mocklog" "hang"
+check_exit_status "hang"
 
 echo
 echo "== flood mode (N6: streaming flood, never exits on its own) =="
@@ -231,6 +245,7 @@ else
     || not_ok "flood: mock brought down promptly, not left streaming (took ${elapsed}s)"
 fi
 check_no_orphans "$mocklog" "flood"
+check_exit_status "flood"
 
 echo
 echo "== action-hang mode (N6: action watchdog, isolated from the read watchdog) =="
@@ -255,6 +270,7 @@ else
   fi
 fi
 check_no_orphans "$mocklog" "action-hang"
+check_exit_status "action-hang"
 
 echo
 echo "== updateCheck path (N6: checkupdates shadowed, four scenarios) =="
@@ -270,6 +286,7 @@ run_updatecheck() {
     not_ok "updatecheck-$scenario: probe printed a PROBE_RESULT line"
     cat "$log"
     check_no_orphans "$mocklog" "updatecheck-$scenario"
+    check_exit_status "updatecheck-$scenario"
     return
   fi
   ok "updatecheck-$scenario: probe printed a PROBE_RESULT line"
@@ -307,6 +324,7 @@ run_updatecheck() {
       ;;
   esac
   check_no_orphans "$mocklog" "updatecheck-$scenario"
+  check_exit_status "updatecheck-$scenario"
 }
 
 run_updatecheck none none
@@ -346,6 +364,7 @@ env MULLVAD_MOCK_LOG="$mocklog" \
   MULLVAD_PROBE_REMOVED=1 \
   PATH="$REMOVED_PATH_DIR" \
   "$TIMEOUT_BIN" 30 "$QS_BIN" -n -p "$PLUGIN_DIR/test/probe/service-probe.qml" > "$log" 2>&1
+echo "$?" > "$OUT_DIR/removed.exit"
 end_ts=$(date +%s)
 elapsed=$((end_ts - start_ts))
 json="$(json_line "$log")"
@@ -379,6 +398,57 @@ else
     || not_ok "removed: busy=false (got: $(field "$json" busy))"
 fi
 check_no_orphans "$mocklog" "removed"
+check_exit_status "removed"
+
+echo
+echo "== status-garbage mode (S19-2: exit-0 but unparseable status --json) =="
+log="$(run_scenario status-garbage MULLVAD_MOCK_MODE=status-garbage MULLVAD_PROBE_NOOP=1)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/status-garbage.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "status-garbage: probe printed a PROBE_RESULT line"
+  cat "$log"
+else
+  ok "status-garbage: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" installed)" == "true" ]] && ok "status-garbage: installed=true" \
+    || not_ok "status-garbage: installed=true (got: $json)"
+  [[ "$(field "$json" daemonRunning)" == "false" ]] && ok "status-garbage: daemonRunning stays false (garbage never authoritative)" \
+    || not_ok "status-garbage: daemonRunning stays false (got: $(field "$json" daemonRunning))"
+  [[ -n "$(field "$json" lastError)" ]] && ok "status-garbage: lastError surfaced the parse failure (non-empty)" \
+    || not_ok "status-garbage: lastError surfaced the parse failure (got empty)"
+  [[ "$(field "$json" lastError)" != *"Mullvad daemon unavailable"* ]] \
+    && ok "status-garbage: took the JSON-parse-failure path, not the daemon-unavailable path" \
+    || not_ok "status-garbage: took the JSON-parse-failure path, not the daemon-unavailable path (got: $(field "$json" lastError))"
+fi
+check_no_orphans "$mocklog" "status-garbage"
+check_exit_status "status-garbage"
+
+echo
+echo "== daemon-down mode (S19-6: unusable-daemon lock -- toggleTunnel spawns nothing) =="
+log="$(run_scenario daemon-down MULLVAD_MOCK_MODE=daemon-down MULLVAD_PROBE_DAEMON_DOWN=1)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/daemon-down.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "daemon-down: probe printed a PROBE_RESULT line"
+  cat "$log"
+else
+  ok "daemon-down: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" installed)" == "true" ]] && ok "daemon-down: installed=true" \
+    || not_ok "daemon-down: installed=true (got: $json)"
+  [[ "$(field "$json" daemonRunning)" == "false" ]] && ok "daemon-down: daemonRunning=false" \
+    || not_ok "daemon-down: daemonRunning=false (got: $(field "$json" daemonRunning))"
+  loc="$(field "$json" locationsLength)"
+  [[ "${loc:-0}" -gt 0 ]] && ok "daemon-down: relay locations still parsed ($loc), so toggleTunnel() reached _command()" \
+    || not_ok "daemon-down: relay locations still parsed (got $loc)"
+  connectCalls="$(grep -c 'ARGV: connect$' "$mocklog" 2>/dev/null)"
+  [[ "${connectCalls:-0}" -eq 0 ]] && ok "daemon-down: toggleTunnel() spawned no connect process ($connectCalls)" \
+    || not_ok "daemon-down: toggleTunnel() spawned no connect process (got $connectCalls)"
+  [[ "$(field "$json" lastError)" == *"Mullvad daemon unavailable"* ]] \
+    && ok "daemon-down: lastError mentions daemon unavailable" \
+    || not_ok "daemon-down: lastError mentions daemon unavailable (got: $(field "$json" lastError))"
+fi
+check_no_orphans "$mocklog" "daemon-down"
+check_exit_status "daemon-down"
 
 echo
 echo "== state-truthfulness matrix (S15: scripted listener transitions) =="
@@ -445,6 +515,7 @@ else
     || not_ok "matrix-a: finalStateIcon=connected (got: $(field "$json" finalStateIcon))"
 fi
 check_no_orphans "$mocklog" "matrix-a"
+check_exit_status "matrix-a"
 
 echo
 echo "-- (b) tunnel drop: connected -> error -> disconnected --"
@@ -474,6 +545,7 @@ else
     || not_ok "matrix-b: finalStateIcon=disconnected"
 fi
 check_no_orphans "$mocklog" "matrix-b"
+check_exit_status "matrix-b"
 
 echo
 echo "-- (c) lockdown block: connected -> disconnecting(block) -> blocked --"
@@ -501,6 +573,7 @@ else
     || not_ok "matrix-c: finalStatusText=Blocked (got: $(field "$json" finalStatusText))"
 fi
 check_no_orphans "$mocklog" "matrix-c"
+check_exit_status "matrix-c"
 
 echo
 echo "-- (d) daemon restart: listener dies, respawns, poll never claims stale connected --"
@@ -526,6 +599,7 @@ else
     || not_ok "matrix-d: listener respawned and state returned to connected (got: $(field "$json" finalState))"
 fi
 check_no_orphans "$mocklog" "matrix-d"
+check_exit_status "matrix-d"
 
 echo
 echo "-- (e) garbage lines: ignored (state unchanged), over-long line truncated --"
@@ -557,6 +631,7 @@ else
     || not_ok "matrix-e: the next valid line applied (got: $(field "$json" finalState))"
 fi
 check_no_orphans "$mocklog" "matrix-e"
+check_exit_status "matrix-e"
 
 echo
 echo "-- poll vs. listener race: a monotonic seq must not let a stale poll win --"
@@ -579,6 +654,33 @@ else
     || not_ok "matrix-race: finalConnected=true"
 fi
 check_no_orphans "$mocklog" "matrix-race"
+check_exit_status "matrix-race"
+
+echo
+echo "-- (S19-1) poll vs. listener race, poll FAILS: a stale failure must not overwrite a newer connected --"
+log="$(run_scenario matrix-race-fail MULLVAD_MOCK_MODE=ok MULLVAD_PROBE_MATRIX=race-fail \
+  MULLVAD_MOCK_LISTEN_SCRIPT="$LISTEN_SCRIPTS/race.txt" \
+  MULLVAD_MOCK_STATUS_DELAY_MS=1500 \
+  MULLVAD_MOCK_STATUS_DELAY_FAIL=1 \
+  MULLVAD_MOCK_STATUS_DELAY_TRIGGER="$OUT_DIR/matrix-race-fail.trigger")"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/matrix-race-fail.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "matrix-race-fail: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "matrix-race-fail: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" stepsTrace)" == "disconnected>connected" ]] \
+    && ok "matrix-race-fail: the stale poll failure never re-applied after the listener's connected (no third step)" \
+    || not_ok "matrix-race-fail: the stale poll failure never re-applied after the listener's connected (got: $(field "$json" stepsTrace))"
+  [[ "$(field "$json" finalState)" == "connected" ]] && ok "matrix-race-fail: finalState=connected (listener wins, not the stale failure)" \
+    || not_ok "matrix-race-fail: finalState=connected (got: $(field "$json" finalState))"
+  [[ "$(field "$json" finalConnected)" == "true" ]] && ok "matrix-race-fail: finalConnected=true" \
+    || not_ok "matrix-race-fail: finalConnected=true"
+  [[ -z "$(field "$json" finalLastError)" ]] && ok "matrix-race-fail: finalLastError still empty (stale failure ignored)" \
+    || not_ok "matrix-race-fail: finalLastError still empty (got: $(field "$json" finalLastError))"
+fi
+check_no_orphans "$mocklog" "matrix-race-fail"
+check_exit_status "matrix-race-fail"
 
 echo
 if [[ "$fail_count" -eq 0 ]]; then

@@ -26,13 +26,18 @@ ShellRoot {
   // MULLVAD_MOCK_LINK at a temp symlink; this scenario deletes it to
   // simulate an uninstall, then drives Service.qml's own recovery path.
   property bool removedScenario: Quickshell.env("MULLVAD_PROBE_REMOVED") === "1"
-  // State-truthfulness matrix: one of a/b/c/d/e/race, or "" for the
-  // scenarios above. Drives a scripted mullvad listener, recording every
-  // observed transition until the expected final state settles.
+  // daemon-down mode: toggleTunnel() must spawn nothing while daemonRunning
+  // is false. noop just drains the read queue and reports, no action.
+  property bool daemonDownScenario: Quickshell.env("MULLVAD_PROBE_DAEMON_DOWN") === "1"
+  property bool noopScenario: Quickshell.env("MULLVAD_PROBE_NOOP") === "1"
+  // State-truthfulness matrix: one of a/b/c/d/e/race/race-fail, or "" for
+  // the scenarios above. Drives a scripted mullvad listener, recording
+  // every observed transition until the expected final state settles.
   property string matrixKind: Quickshell.env("MULLVAD_PROBE_MATRIX") || ""
+  property bool isRaceLike: matrixKind === "race" || matrixKind === "race-fail"
   property string matrixExpectFinal: ({
     a: "connected", b: "disconnected", c: "blocked", d: "connected", e: "connected",
-    race: "connected"
+    race: "connected", "race-fail": "connected"
   })[matrixKind] || ""
   property var matrixSteps: []
   property string _lastMatrixKey: ""
@@ -59,7 +64,7 @@ ShellRoot {
       if ("listenerRestartMs" in item) item.listenerRestartMs = 300
       // The race scenario's deliberately-slow poll (~1500ms) must not trip
       // the generic 1500ms read watchdog before it even returns its data.
-      if (matrixKind === "race" && "readTimeoutMs" in item) item.readTimeoutMs = 4000
+      if (isRaceLike && "readTimeoutMs" in item) item.readTimeoutMs = 4000
       settleTimer.start()
     }
   }
@@ -108,7 +113,7 @@ ShellRoot {
   // performs ONLY connect, to exercise the action watchdog in isolation.
   function afterReadsDrained() {
     elapsedMs = 0
-    if (matrixKind === "race") {
+    if (isRaceLike) {
       _matrixHistoryOffset = (debugProp("_statusHistory") || []).length
       raceTriggerProcess.command = ["touch", Quickshell.env("MULLVAD_MOCK_STATUS_DELAY_TRIGGER")]
       raceTriggerProcess.running = true
@@ -118,6 +123,11 @@ ShellRoot {
     } else if (removedScenario) {
       removeLinkProcess.command = ["rm", "-f", Quickshell.env("MULLVAD_MOCK_LINK")]
       removeLinkProcess.running = true
+    } else if (daemonDownScenario) {
+      service.toggleTunnel()
+      _drainThen(afterActions)
+    } else if (noopScenario) {
+      finish("")
     } else if (actionOnly) {
       service.connectTunnel()
       _drainThen(afterActions)
@@ -213,7 +223,7 @@ ShellRoot {
       } else {
         probeRoot._matrixStableTicks++
       }
-      if (probeRoot.matrixKind === "race") return // raceWaitTimer owns finishing
+      if (probeRoot.isRaceLike) return // raceWaitTimer owns finishing
       var settled = probeRoot.service.state === probeRoot.matrixExpectFinal && probeRoot._matrixStableTicks >= 6
       if (settled || probeRoot._matrixElapsedMs > 15000) {
         matrixTimer.stop()

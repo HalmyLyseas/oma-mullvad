@@ -373,6 +373,9 @@ Item {
     var combined = String(raw || "") + "\n" + String(error || "")
     if (kind === "status") {
       if (exitCode !== 0) {
+        // A newer listener event already applied since this poll started --
+        // its failure is stale and must not clobber that newer truth.
+        if (root._pendingStatusSeq < root._statusApplySeq) return
         daemonRunning = false
         connected = false
         state = "unavailable"
@@ -380,6 +383,15 @@ Item {
         var daemonDetail = _shortError(combined, "")
         lastError = "Mullvad daemon unavailable. Open Mullvad VPN or start mullvad-daemon, then refresh."
           + (daemonDetail ? " " + daemonDetail : "")
+        return
+      }
+      // Validate JSON first, same as the listener: Model.parseStatus never
+      // throws on garbage (it silently maps to "unknown"), so without this
+      // a malformed-but-exit-0 poll would still flip daemonRunning true.
+      try {
+        JSON.parse(raw)
+      } catch (e) {
+        lastError = _shortError(e, "Could not parse Mullvad status")
         return
       }
       try {
@@ -509,6 +521,10 @@ Item {
   function _command(action, params) {
     if (!installed) {
       lastError = "Mullvad CLI not found. Use the install button below, or install the mullvad-vpn package and refresh."
+      return null
+    }
+    if (!daemonRunning) {
+      lastError = "Mullvad daemon unavailable. Open Mullvad VPN or start mullvad-daemon, then refresh."
       return null
     }
     try {

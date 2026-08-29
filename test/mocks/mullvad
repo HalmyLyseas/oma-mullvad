@@ -83,6 +83,21 @@ if [[ "$MODE" == "untestedversion" && "$*" == "--version" ]]; then
   exit 0
 fi
 
+# status-garbage: status --json exits 0 but prints unparseable JSON;
+# every other invocation behaves like "ok".
+if [[ "$MODE" == "status-garbage" && "$*" == "status --json" ]]; then
+  echo "garbage"
+  exit 0
+fi
+
+# daemon-down: status --json always fails (daemon unreachable), so a
+# connect attempt built on already-populated relay data proves the
+# refusal happens in the plugin, not just because the CLI would fail too.
+if [[ "$MODE" == "daemon-down" && "$*" == "status --json" ]]; then
+  echo "mock daemon-down: mullvad status --json" >&2
+  exit 1
+fi
+
 # --- account login: reads exactly one stdin line ----------------------------
 if [[ "${1:-}" == "account" && "${2:-}" == "login" ]]; then
   if [[ "$MODE" == "fail" ]]; then
@@ -118,6 +133,12 @@ case "$*" in
     if [[ -n "${MULLVAD_MOCK_STATUS_DELAY_TRIGGER:-}" && -f "$MULLVAD_MOCK_STATUS_DELAY_TRIGGER" ]]; then
       rm -f "$MULLVAD_MOCK_STATUS_DELAY_TRIGGER"
       _sleep_ms "${MULLVAD_MOCK_STATUS_DELAY_MS:-1500}"
+      # The delayed poll can also FAIL instead of returning stale data,
+      # proving a newer listener success survives a late poll error.
+      if [[ "${MULLVAD_MOCK_STATUS_DELAY_FAIL:-0}" == "1" ]]; then
+        echo "mock status-delay-fail: mullvad status --json" >&2
+        exit 1
+      fi
     fi
     cat "$FIXTURES/status-json.txt"
     exit 0
