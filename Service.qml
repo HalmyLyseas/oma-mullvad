@@ -149,6 +149,56 @@ Item {
   property int _readArmedPid: 0
   property int _actionArmedPid: 0
   property int _updateCheckArmedPid: 0
+  // S12 (28-s12-failed-start-spec.md): a Process whose binary is missing
+  // logs Quickshell's own "Process failed to start" warning and flips
+  // `running` to false WITHOUT ever emitting `exited` (measured live,
+  // scratchpad/s12/ -- neither `onStarted` nor `onExited` fires; a normal
+  // exit's `running:true->false` transition, by contrast, is always
+  // immediately followed by `exited`, ALSO measured live, scratchpad/s12/
+  // probe3.qml). Every onExited body below used to be the ONLY place a
+  // read/action/updateCheck got finalized (watchdog/kill timer stopped,
+  // result applied, queue continued) -- a failed-start read therefore never
+  // applied its result at all (stale `_readKind`, watchdog left armed
+  // harmless-but-dirty), a failed-start action left `actionStatus` stuck at
+  // "<label>…" forever with no `refreshAll()` (installed/daemonRunning
+  // never re-checked), and the live listener kept streaming from a daemon
+  // whose CLI binary no longer resolves. Fixed by a per-process
+  // `onRunningChanged` that schedules a `Qt.callLater` check (deferred so a
+  // normal exit's own `exited` -- which also flips `running`, and always
+  // fires first, same probe3.qml evidence -- has already run) that
+  // synthesizes the same finalize call with exitCode 127 when `exited`
+  // never came.
+  //
+  // A single boolean "have we seen exited yet" flag is NOT enough here and
+  // was measured to corrupt the read queue: `_readFinalize`'s own
+  // `Qt.callLater(root._startNextRead)` (queued from the REAL onExited,
+  // which fires first) starts arming the NEXT read in the SAME callLater
+  // batch that also contains the FIRST read's now-stale onRunningChanged
+  // check (queued second). Back-to-back fast/successful reads (the mock
+  // suite's `cat`-a-fixture reads all complete inside a single tick) can
+  // therefore let `_startNextRead()` reset a plain boolean flag back to
+  // `false` for read N+1 BEFORE read N's own stale callLater callback
+  // finally runs -- that callback then misreads read N+1's fresh "armed,
+  // not yet exited" state as read N's own missing exit and synthesizes a
+  // bogus failure against the wrong (still legitimately running) process,
+  // clobbering `_readKind` and double-queuing `_startNextRead()`. Measured
+  // live: this exact race made the "ok" scenario's `relay list` read get
+  // invoked 3x and `locationsLength` come back 0 before this was found and
+  // fixed (test/all's first post-fix run, this pass). Fixed with a
+  // monotonically increasing generation counter per kind instead of a
+  // boolean: `_startNextRead()`/`_armAction()`/`checkForUpdates()` bump
+  // `_<kind>Gen` on every arm; the real `onExited` stamps
+  // `_<kind>ExitedGen = _<kind>Gen`; the deferred check captures the
+  // generation synchronously (before scheduling) and only acts if
+  // `_<kind>Gen` still equals what it captured AND no real exit stamped
+  // that same generation -- so a stale callback for an already-superseded
+  // arm is always a safe no-op, however late it actually runs.
+  property int _readGen: 0
+  property int _readExitedGen: -1
+  property int _actionGen: 0
+  property int _actionExitedGen: -1
+  property int _updateCheckGen: 0
+  property int _updateCheckExitedGen: -1
 
   function _redact(value) {
     return Model.redact(String(value || ""))
@@ -252,6 +302,7 @@ Item {
     _readQueue = queue
     _readKind = request.kind
     _resetReadOutput()
+    _readGen = _readGen + 1
     readWatchdog.interval = request.timeoutMs || root.readTimeoutMs
     readWatchdog.restart()
     readProcess.command = request.command
@@ -350,6 +401,12 @@ Item {
         statusText = "Mullvad is not installed"
         lastError = "Mullvad CLI not found. Use the install button below, or install the mullvad-vpn package and refresh."
         cliVersion = ""
+        // S12: previously left stale -- the System tab kept showing a
+        // daemon version/support/upgrade suggestion from before the CLI
+        // disappeared.
+        daemonVersion = ""
+        daemonSupported = null
+        suggestedUpgrade = ""
         if (listenerProcess.running) listenerProcess.running = false
       } else {
         if (lastError.indexOf("Mullvad CLI not found") === 0) lastError = ""
@@ -537,6 +594,7 @@ Item {
     // blanks actionStatus out from under a still-busy queue.
     actionStatusTimer.stop()
     _resetActionOutput()
+    _actionGen = _actionGen + 1
     actionWatchdog.interval = root.actionTimeoutMs
     actionWatchdog.restart()
     actionProcess.label = label
@@ -723,6 +781,7 @@ Item {
       _updateCheckAttemptedAt = Date.now()
       updateCheckStatus = "checking"
       _resetUpdateCheckOutput()
+      _updateCheckGen = _updateCheckGen + 1
       updateCheckWatchdog.interval = root.updateCheckTimeoutMs
       updateCheckWatchdog.restart()
       // S10: updateCheckScript stays a direct (unwrapped) bash script child
@@ -827,39 +886,70 @@ Item {
     }
   }
 
+  // S12: shared by the real onExited below and the synthetic failed-start
+  // path (readProcess's onRunningChanged, further down) -- exitStatus===1
+  // (CrashExit, killed by signal) is folded into a nonzero exitCode
+  // regardless of exitCode; a synthetic failed-start call passes
+  // exitStatus 0 (its exitCode 127 alone is already nonzero, and no real
+  // QProcess::ExitStatus applies since the child never actually ran).
+  function _readFinalize(exitCode, exitStatus, syntheticError) {
+    readWatchdog.stop()
+    readKillTimer.stop()
+    var kind = root._readKind
+    root._readKind = ""
+    if (syntheticError) {
+      root._applyRead(kind, "", syntheticError, exitCode)
+    } else if (root._readWatchdogFired) {
+      root._readWatchdogFired = false
+      root._applyRead(kind, "", "timed out", 124)
+    } else if (root._readOverflowed) {
+      root._applyRead(kind, "", "output limit exceeded", 137)
+    } else {
+      var raw = root._readLines.join("\n")
+      var error = root._readErrorLines.join("\n")
+      var effectiveExitCode = (exitStatus === 1 && exitCode === 0) ? 1 : exitCode
+      root._applyRead(kind, raw, error, effectiveExitCode)
+    }
+    Qt.callLater(root._startNextRead)
+  }
+
   Process {
     id: readProcess
     command: []
     running: false
     onStarted: { root._readArmedPid = processId }
+    // S12: Quickshell flips `running` to false without ever emitting
+    // `exited` when the binary itself cannot be found (measured,
+    // scratchpad/s12/) -- `Qt.callLater` defers this check to the next
+    // event-loop turn so a NORMAL exit's own `exited` handler (which also
+    // flips `running`, and runs synchronously before any queued
+    // `callLater`) has already stamped `_readExitedGen` first, making this
+    // a no-op in that case. `gen` is captured NOW (synchronously), not read
+    // fresh inside the callback -- seeing _readGen or _readExitedGen out of
+    // this file: `_readGen`'s comment above explains why a plain boolean
+    // isn't safe here.
+    onRunningChanged: {
+      if (!running) {
+        var gen = root._readGen
+        Qt.callLater(function() {
+          if (root._readGen === gen && root._readExitedGen !== gen) {
+            root._readExitedGen = gen
+            root._readFinalize(127, 0, "failed to start (binary missing?)")
+          }
+        })
+      }
+    }
     stdout: SplitParser {
       onRead: function(line) { root._appendReadOutput(line, false) }
     }
     stderr: SplitParser {
       onRead: function(line) { root._appendReadOutput(line, true) }
     }
-    // exited(exitCode, exitStatus): exitStatus === 1 is CrashExit (killed by
-    // signal) regardless of exitCode -- measured live, a signalled child can
-    // report exitCode 0. Treated as a failure either way; folded into a
-    // nonzero exitCode so every existing per-kind branch in _applyRead()
-    // (which all key off exitCode !== 0) needs no separate crash-aware path.
+    // exited(exitCode, exitStatus): see _readFinalize above for the
+    // CrashExit fold-in.
     onExited: function(exitCode, exitStatus) {
-      readWatchdog.stop()
-      readKillTimer.stop()
-      var kind = root._readKind
-      root._readKind = ""
-      if (root._readWatchdogFired) {
-        root._readWatchdogFired = false
-        root._applyRead(kind, "", "timed out", 124)
-      } else if (root._readOverflowed) {
-        root._applyRead(kind, "", "output limit exceeded", 137)
-      } else {
-        var raw = root._readLines.join("\n")
-        var error = root._readErrorLines.join("\n")
-        var effectiveExitCode = (exitStatus === 1 && exitCode === 0) ? 1 : exitCode
-        root._applyRead(kind, raw, error, effectiveExitCode)
-      }
-      Qt.callLater(root._startNextRead)
+      root._readExitedGen = root._readGen
+      root._readFinalize(exitCode, exitStatus, null)
     }
   }
 
@@ -944,7 +1034,26 @@ Item {
     // false). Cleared here on every transition to not-running, and again in
     // onExited below as a second, redundant guard for the same lifetime
     // event (harmless if onRunningChanged already cleared it).
-    onRunningChanged: { if (!running) secret = "" }
+    //
+    // S12 (28-s12-failed-start-spec.md): same handler also carries the
+    // synthetic-failed-start guard shared with readProcess/updateCheckProcess
+    // above/below -- a single Process may only declare one onRunningChanged.
+    // Without this, an action whose binary vanished left `actionStatus`
+    // stuck at "<label>…" forever (no `onExited` ever ran to overwrite it)
+    // and never called `refreshAll()`, so `installed`/`daemonRunning` never
+    // re-checked either.
+    onRunningChanged: {
+      if (!running) {
+        secret = ""
+        var gen = root._actionGen
+        Qt.callLater(function() {
+          if (root._actionGen === gen && root._actionExitedGen !== gen) {
+            root._actionExitedGen = gen
+            root._actionFinalize(127, 0, "failed to start (binary missing?)")
+          }
+        })
+      }
+    }
     // 22-login-stdin-bug.md fix at the mechanism level: Process.write()
     // reaches the child's real stdin directly (no backgrounded shell job to
     // silently substitute /dev/null). Every action closes stdin via EOF
@@ -969,38 +1078,51 @@ Item {
       onRead: function(line) { root._appendActionOutput(line, true) }
     }
     onExited: function(exitCode, exitStatus) {
-      actionWatchdog.stop()
-      actionKillTimer.stop()
-      secret = "" // N3: redundant with onRunningChanged above, belt-and-suspenders.
-      var label = actionProcess.label
-      var success = false
-      if (root._actionWatchdogFired) {
-        root._actionWatchdogFired = false
-        root.lastError = label + " timed out"
-        root.actionStatus = root.lastError
-        root._actionQueue = []
-      } else if (root._actionOverflowed) {
-        root.lastError = label + " failed: output limit exceeded"
+      root._actionExitedGen = root._actionGen
+      root._actionFinalize(exitCode, exitStatus, null)
+    }
+  }
+
+  // S12: shared by actionProcess's real onExited and its synthetic
+  // failed-start path above (see _readFinalize's comment for why the
+  // shared-helper shape). `syntheticError`, when set, always means the
+  // binary never started at all.
+  function _actionFinalize(exitCode, exitStatus, syntheticError) {
+    actionWatchdog.stop()
+    actionKillTimer.stop()
+    actionProcess.secret = "" // N3: redundant with onRunningChanged above, belt-and-suspenders.
+    var label = actionProcess.label
+    var success = false
+    if (syntheticError) {
+      root.lastError = root._shortError(syntheticError, label + " failed")
+      root.actionStatus = root.lastError
+      root._actionQueue = []
+    } else if (root._actionWatchdogFired) {
+      root._actionWatchdogFired = false
+      root.lastError = label + " timed out"
+      root.actionStatus = root.lastError
+      root._actionQueue = []
+    } else if (root._actionOverflowed) {
+      root.lastError = label + " failed: output limit exceeded"
+      root.actionStatus = root.lastError
+      root._actionQueue = []
+    } else {
+      var effectiveExitCode = (exitStatus === 1 && exitCode === 0) ? 1 : exitCode
+      var output = root._actionLines.join("\n")
+      var error = root._actionErrorLines.join("\n")
+      if (effectiveExitCode !== 0) {
+        root.lastError = root._shortError(error || output, label + " failed")
         root.actionStatus = root.lastError
         root._actionQueue = []
       } else {
-        var effectiveExitCode = (exitStatus === 1 && exitCode === 0) ? 1 : exitCode
-        var output = root._actionLines.join("\n")
-        var error = root._actionErrorLines.join("\n")
-        if (effectiveExitCode !== 0) {
-          root.lastError = root._shortError(error || output, label + " failed")
-          root.actionStatus = root.lastError
-          root._actionQueue = []
-        } else {
-          root.lastError = ""
-          root.actionStatus = label + " complete"
-          actionStatusTimer.restart()
-          success = true
-        }
+        root.lastError = ""
+        root.actionStatus = label + " complete"
+        actionStatusTimer.restart()
+        success = true
       }
-      root.refreshAll()
-      if (success) Qt.callLater(root._startNextAction)
     }
+    root.refreshAll()
+    if (success) Qt.callLater(root._startNextAction)
   }
 
   // S10: same pattern again. updateCheckScript already enforces its own
@@ -1033,11 +1155,64 @@ Item {
 
   // T2: deliberately separate from readProcess/actionProcess -- see the
   // comment on checkForUpdates() above. Not counted in `busy`.
+  // S12: shared by updateCheckProcess's real onExited and its synthetic
+  // failed-start path below. A synthetic call always reaches the final
+  // `else` (nonzero effectiveExitCode) branch below, same as any other
+  // nonzero exit -- `scripts/mullvad-update-check` failing to spawn at all
+  // is just as "inconclusive" as it timing out or being killed for
+  // overflow, so no separate syntheticError branch is needed here (unlike
+  // _readFinalize/_actionFinalize, which surface distinct error text).
+  function _updateCheckFinalize(exitCode, exitStatus) {
+    updateCheckWatchdog.stop()
+    updateCheckKillTimer.stop()
+    var timedOutOrOverflowed = root._updateCheckWatchdogFired || root._updateCheckOverflowed
+    root._updateCheckWatchdogFired = false
+    if (timedOutOrOverflowed) {
+      // scripts/mullvad-update-check exit 3 (offline/lock/timeout): "does
+      // nothing" per the human's rule -- only the status flips so the UI
+      // can say so; updateAvailable/updateTargets/updateCheckedAt are
+      // left exactly as they were. A watchdog/overflow kill is treated
+      // the same way: inconclusive, not a parse-worthy result.
+      root.updateCheckStatus = "unavailable"
+      return
+    }
+    var effectiveExitCode = (exitStatus === 1 && exitCode === 0) ? 1 : exitCode
+    var raw = root._updateCheckLines.join("\n")
+    if (effectiveExitCode === 0) {
+      try {
+        root.updateTargets = Model.parseUpdateCheck(raw)
+      } catch (e) {
+        root.updateTargets = []
+      }
+      root.updateAvailable = root.updateTargets.length > 0
+      root.updateCheckStatus = "ok"
+      root.updateCheckedAt = Date.now()
+    } else {
+      root.updateCheckStatus = "unavailable"
+    }
+  }
+
   Process {
     id: updateCheckProcess
     command: []
     running: false
     onStarted: { root._updateCheckArmedPid = processId }
+    // S12: same synthetic-failed-start guard as readProcess/actionProcess
+    // above -- `scripts/mullvad-update-check` (a bash script, not the
+    // Mullvad CLI) can just as easily fail to spawn if e.g. its own
+    // interpreter disappears; without this, updateCheckStatus stayed
+    // stuck at "checking" forever.
+    onRunningChanged: {
+      if (!running) {
+        var gen = root._updateCheckGen
+        Qt.callLater(function() {
+          if (root._updateCheckGen === gen && root._updateCheckExitedGen !== gen) {
+            root._updateCheckExitedGen = gen
+            root._updateCheckFinalize(127, 0)
+          }
+        })
+      }
+    }
     stdout: SplitParser {
       onRead: function(line) { root._appendUpdateCheckOutput(line, false) }
     }
@@ -1045,33 +1220,8 @@ Item {
       onRead: function(line) { root._appendUpdateCheckOutput(line, true) }
     }
     onExited: function(exitCode, exitStatus) {
-      updateCheckWatchdog.stop()
-      updateCheckKillTimer.stop()
-      var timedOutOrOverflowed = root._updateCheckWatchdogFired || root._updateCheckOverflowed
-      root._updateCheckWatchdogFired = false
-      if (timedOutOrOverflowed) {
-        // scripts/mullvad-update-check exit 3 (offline/lock/timeout): "does
-        // nothing" per the human's rule -- only the status flips so the UI
-        // can say so; updateAvailable/updateTargets/updateCheckedAt are
-        // left exactly as they were. A watchdog/overflow kill is treated
-        // the same way: inconclusive, not a parse-worthy result.
-        root.updateCheckStatus = "unavailable"
-        return
-      }
-      var effectiveExitCode = (exitStatus === 1 && exitCode === 0) ? 1 : exitCode
-      var raw = root._updateCheckLines.join("\n")
-      if (effectiveExitCode === 0) {
-        try {
-          root.updateTargets = Model.parseUpdateCheck(raw)
-        } catch (e) {
-          root.updateTargets = []
-        }
-        root.updateAvailable = root.updateTargets.length > 0
-        root.updateCheckStatus = "ok"
-        root.updateCheckedAt = Date.now()
-      } else {
-        root.updateCheckStatus = "unavailable"
-      }
+      root._updateCheckExitedGen = root._updateCheckGen
+      root._updateCheckFinalize(exitCode, exitStatus)
     }
   }
 }
