@@ -110,32 +110,43 @@ run_install() {
   rm -f "$log"
 }
 
-result="$(MOCK_DAEMON_ACTIVE=0 run_install)"
+# The daemon is only left alone when BOTH enabled and active -- active
+# alone used to be enough, which stranded an active-but-disabled daemon
+# disabled forever after a reboot (never re-tested by the installer).
+
+result="$(MOCK_DAEMON_ACTIVE=0 MOCK_DAEMON_ENABLED=0 run_install)"
 code="$(echo "$result" | head -n1)"
 log="$(echo "$result" | tail -n+2)"
-assert_eq "install-mullvad (daemon inactive) exits 0" "0" "$code"
-assert_contains "install-mullvad (daemon inactive) calls omarchy-pkg-add mullvad-vpn" "$log" \
+assert_eq "install-mullvad (inactive, disabled) exits 0" "0" "$code"
+assert_contains "install-mullvad (inactive, disabled) calls omarchy-pkg-add mullvad-vpn" "$log" \
   "omarchy-pkg-add mullvad-vpn"
-assert_contains "install-mullvad (daemon inactive) checks systemctl is-active" "$log" \
-  "systemctl is-active --quiet mullvad-daemon"
-assert_contains "install-mullvad (daemon inactive) enables the daemon via sudo" "$log" \
+assert_contains "install-mullvad (inactive, disabled) checks systemctl is-enabled" "$log" \
+  "systemctl is-enabled --quiet mullvad-daemon"
+assert_contains "install-mullvad (inactive, disabled) enables the daemon via sudo" "$log" \
   "sudo systemctl enable --now mullvad-daemon"
 pkg_line="$(echo "$log" | grep -n "omarchy-pkg-add" | head -n1 | cut -d: -f1)"
 sudo_line="$(echo "$log" | grep -n "^sudo " | head -n1 | cut -d: -f1)"
 if [[ -n "$pkg_line" && -n "$sudo_line" && "$pkg_line" -lt "$sudo_line" ]]; then
-  ok "install-mullvad (daemon inactive) installs before enabling"
+  ok "install-mullvad (inactive, disabled) installs before enabling"
 else
-  not_ok "install-mullvad (daemon inactive) installs before enabling (pkg line $pkg_line, sudo line $sudo_line)"
+  not_ok "install-mullvad (inactive, disabled) installs before enabling (pkg line $pkg_line, sudo line $sudo_line)"
 fi
 
-result="$(MOCK_DAEMON_ACTIVE=1 run_install)"
+result="$(MOCK_DAEMON_ACTIVE=1 MOCK_DAEMON_ENABLED=0 run_install)"
 code="$(echo "$result" | head -n1)"
 log="$(echo "$result" | tail -n+2)"
-assert_eq "install-mullvad (daemon active) exits 0" "0" "$code"
-assert_contains "install-mullvad (daemon active) calls omarchy-pkg-add mullvad-vpn" "$log" \
+assert_eq "install-mullvad (active, disabled) exits 0" "0" "$code"
+assert_contains "install-mullvad (active, disabled) enables the daemon via sudo" "$log" \
+  "sudo systemctl enable --now mullvad-daemon"
+
+result="$(MOCK_DAEMON_ACTIVE=1 MOCK_DAEMON_ENABLED=1 run_install)"
+code="$(echo "$result" | head -n1)"
+log="$(echo "$result" | tail -n+2)"
+assert_eq "install-mullvad (active, enabled) exits 0" "0" "$code"
+assert_contains "install-mullvad (active, enabled) calls omarchy-pkg-add mullvad-vpn" "$log" \
   "omarchy-pkg-add mullvad-vpn"
 sudo_calls="$(echo "$log" | grep -c "^sudo " || true)"
-assert_eq "install-mullvad (daemon active) never calls sudo" "0" "$sudo_calls"
+assert_eq "install-mullvad (active, enabled) never calls sudo" "0" "$sudo_calls"
 
 result="$(MOCK_PKG_ADD_EXIT=1 MOCK_DAEMON_ACTIVE=0 run_install)"
 code="$(echo "$result" | head -n1)"

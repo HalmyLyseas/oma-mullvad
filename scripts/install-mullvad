@@ -8,6 +8,6 @@ echo "Installing Mullvad VPN..."
 omarchy-pkg-add mullvad-vpn
 
 echo "Enabling Mullvad daemon..."
-if ! systemctl is-active --quiet mullvad-daemon; then
+if ! (systemctl is-enabled --quiet mullvad-daemon && systemctl is-active --quiet mullvad-daemon); then
   sudo systemctl enable --now mullvad-daemon
 fi
