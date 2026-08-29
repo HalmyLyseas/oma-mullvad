@@ -717,6 +717,16 @@ function parseCliVersion(raw) {
     return match ? plainText(match[1], 32) : "";
 }
 
+// Mullvad CLI versions this plugin has actually been tested against.
+var SUPPORTED_CLI_VERSIONS = ["2026.4"];
+
+// True when `version`'s major.minor prefix exactly matches an entry in
+// SUPPORTED_CLI_VERSIONS -- "2026.4.1" counts as "2026.4", "2026.40" does not.
+function isCliVersionSupported(version) {
+    var match = String(version || "").match(/^(\d+\.\d+)/);
+    return match !== null && SUPPORTED_CLI_VERSIONS.indexOf(match[1]) !== -1;
+}
+
 // Parses `mullvad version` (queries the running daemon, not the same as
 // `mullvad-daemon --version`): a 3-line "Current version / Is supported /
 // Suggested upgrade" report.
@@ -1032,6 +1042,8 @@ var api = {
     parseProcessTable: parseProcessTable,
     groupExcludedProcesses: groupExcludedProcesses,
     parseCliVersion: parseCliVersion,
+    SUPPORTED_CLI_VERSIONS: SUPPORTED_CLI_VERSIONS,
+    isCliVersionSupported: isCliVersionSupported,
     parseDaemonVersion: parseDaemonVersion,
     parsePackageInfo: parsePackageInfo,
     parseUpdateCheck: parseUpdateCheck,

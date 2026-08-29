@@ -272,6 +272,17 @@ test("T2: parseCliVersion/parseDaemonVersion match real mullvad CLI output shape
     assert.equal(Model.parseDaemonVersion("").supported, null);
 });
 
+test("T2: SUPPORTED_CLI_VERSIONS / isCliVersionSupported match on the major.minor prefix", () => {
+    assert.deepEqual(Model.SUPPORTED_CLI_VERSIONS, ["2026.4"]);
+    assert.equal(Model.isCliVersionSupported("2026.4"), true);
+    assert.equal(Model.isCliVersionSupported("2026.4.1"), true);
+    assert.equal(Model.isCliVersionSupported("2026.4-beta1"), true);
+    assert.equal(Model.isCliVersionSupported("2026.40"), false);
+    assert.equal(Model.isCliVersionSupported("2027.1"), false);
+    assert.equal(Model.isCliVersionSupported(""), false);
+    assert.equal(Model.isCliVersionSupported(undefined), false);
+});
+
 test("T2: parsePackageInfo only accepts the two known Mullvad package names, bounds fields", () => {
     const packages = Model.parsePackageInfo(
         "mullvad-vpn\t2026.4-1\t1787763238\t1786971553\n" +
