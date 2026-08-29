@@ -459,7 +459,18 @@ function parseAccount(raw, nowMs) {
 }
 
 function parseToggle(raw) {
-    var matches = boundedInput(raw, 4096).toLowerCase().match(/\b(on|off|enabled|disabled|allow|block|true|false|yes|no)\b/g);
+    // F3 (D3 fix): try the value right after the first "key:" line first --
+    // anchored so trailing hint/help text on a later line (e.g. "Autoconnect:
+    // on\nHint: ... off by default") can never flip the result. Only if that
+    // fails do we fall back to the old "last on/off-ish word anywhere" scan,
+    // which existing callers rely on for bare single-word values (e.g.
+    // parseDns splitting "Block ads: true" into key/value before calling
+    // this with just "true").
+    var input = boundedInput(raw, 4096);
+    var lineMatch = input.match(/^[^:\n]*:\s*(on|off|enabled|disabled|allow|block|true|false|yes|no)\b/im);
+    if (lineMatch)
+        return /^(on|enabled|allow|true|yes)$/i.test(lineMatch[1]);
+    var matches = input.toLowerCase().match(/\b(on|off|enabled|disabled|allow|block|true|false|yes|no)\b/g);
     if (!matches || !matches.length)
         return null;
     return /^(on|enabled|allow|true|yes)$/.test(matches[matches.length - 1]);

@@ -149,6 +149,10 @@ test("toggles and DNS getter/default/custom commands round-trip supported settin
     assert.equal(Model.parseToggle("Lockdown mode: on"), true);
     assert.equal(Model.parseToggle("Local network sharing: block"), false);
     assert.equal(Model.parseToggle("unknown"), null);
+    // F3 (D3 fix): a trailing hint/help line must never override the value
+    // that actually followed the first "key:" -- the line-anchored match
+    // wins over the old last-match-anywhere fallback.
+    assert.equal(Model.parseToggle("Autoconnect: on\nHint: … off by default"), true);
 
     const dns = Model.parseDns(`Custom DNS: yes
 Servers: 1.1.1.1, 2606:4700:4700::1111
