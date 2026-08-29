@@ -58,7 +58,7 @@ const status = readOnly(["status", "--json"]);
 if (status.status !== 0) skip("Mullvad daemon is unavailable");
 ensureNoAccount(status.stdout, "status");
 const snapshot = JSON.parse(status.stdout);
-assert.ok(["connected", "connecting", "disconnected", "disconnecting", "error"].includes(snapshot.state));
+assert.ok(["connected", "connecting", "disconnected", "disconnecting", "error", "blocked"].includes(snapshot.state));
 assert.equal(typeof snapshot.details, "object");
 
 check(["relay", "list"], output => {

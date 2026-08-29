@@ -38,7 +38,18 @@ run_scenario() {
     PATH="$PLUGIN_DIR/test/mocks:$PATH" \
     "$@" \
     timeout 30 qs -n -p "$PLUGIN_DIR/test/probe/ui-probe.qml" > "$log" 2>&1
+  echo "$?" > "$OUT_DIR/$label.exit"
   echo "$log"
+}
+
+# check_exit_status <label> -- qs's own exit status used to be discarded
+# entirely, so a scenario that crashed/timed out after printing a valid
+# PROBE_RESULT line still passed every field assertion.
+check_exit_status() {
+  local label="$1" code
+  code="$(cat "$OUT_DIR/$label.exit" 2>/dev/null || echo "")"
+  [[ "$code" == "0" ]] && ok "$label: qs exited 0 (not a crash/timeout, got $code)" \
+    || not_ok "$label: qs exited 0 (not a crash/timeout, got exit code: ${code:-unknown})"
 }
 
 json_line() { grep -o 'PROBE_RESULT .*' "$1" | tail -n1 | sed 's/^PROBE_RESULT //'; }
@@ -88,14 +99,15 @@ check_no_orphans() {
   fi
 }
 
-# check_no_engine_errors <log> <label> -- a missing stub bar/shell surface
-# property/method throws a TypeError or ReferenceError; fail on either.
+# check_no_engine_errors <log> <label> -- a missing stub property/method
+# throws a TypeError/ReferenceError (a WARN "scene" line); a QML load
+# failure instead aborts the run with two "ERROR:" lines (both measured).
 check_no_engine_errors() {
   local log="$1" label="$2"
   local count
-  count="$(grep -c 'TypeError\|ReferenceError' "$log" 2>/dev/null)"
-  [[ "${count:-0}" -eq 0 ]] && ok "$label: 0 TypeError/ReferenceError in the log" \
-    || not_ok "$label: 0 TypeError/ReferenceError in the log (got $count)"
+  count="$(grep -c 'TypeError\|ReferenceError\|ERROR' "$log" 2>/dev/null)"
+  [[ "${count:-0}" -eq 0 ]] && ok "$label: 0 TypeError/ReferenceError/QML load ERROR in the log" \
+    || not_ok "$label: 0 TypeError/ReferenceError/QML load ERROR in the log (got $count)"
 }
 
 echo "== (1) locked: CLI absent (mock --version fails) =="
@@ -119,6 +131,7 @@ else
 fi
 check_no_engine_errors "$log" "locked"
 check_no_orphans "$mocklog" "locked"
+check_exit_status "locked"
 
 echo
 echo "== (2) ready: CLI + daemon usable, all pages unlocked =="
@@ -145,6 +158,7 @@ else
 fi
 check_no_engine_errors "$log" "ready"
 check_no_orphans "$mocklog" "ready"
+check_exit_status "ready"
 
 echo
 echo "== (3) dropdown: Ownership value follows the model, self-heals after a failed set =="
@@ -172,6 +186,7 @@ else
 fi
 check_no_engine_errors "$log" "dropdown"
 check_no_orphans "$mocklog" "dropdown"
+check_exit_status "dropdown"
 
 echo
 echo "== (4) excluded: groups render (Repeater count), appRows() memoized =="
@@ -195,6 +210,7 @@ else
 fi
 check_no_engine_errors "$log" "excluded"
 check_no_orphans "$mocklog" "excluded"
+check_exit_status "excluded"
 
 echo
 echo "== (5) lifecycle: svc -> null -> new service, no TypeErrors =="
@@ -222,6 +238,7 @@ else
 fi
 check_no_engine_errors "$log" "lifecycle"
 check_no_orphans "$mocklog" "lifecycle"
+check_exit_status "lifecycle"
 
 echo
 echo "== (6) versionwarning: untested CLI shows the Overview notice + System \"(untested)\" =="
@@ -246,6 +263,7 @@ else
 fi
 check_no_engine_errors "$log" "versionwarning"
 check_no_orphans "$mocklog" "versionwarning"
+check_exit_status "versionwarning"
 
 echo
 if [[ "$fail_count" -eq 0 ]]; then
