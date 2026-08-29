@@ -135,6 +135,18 @@ Item {
   property int _readOverflowCount: 0
   property int _actionOverflowCount: 0
   property int _updateCheckOverflowCount: 0
+  // N2 (25-fable-review-s10.md): the PID each *KillTimer is allowed to
+  // signal(9), captured from Process.processId in that process's own
+  // onStarted. Guards against a stale kill timer (see the timers
+  // themselves, below) escalating against a DIFFERENT process than the one
+  // that armed it -- e.g. a read that exits promptly on the watchdog's own
+  // signal(15) lets the queue start the NEXT read before the still-ticking
+  // 1s kill timer fires; without this guard that timer's `if (proc.running)
+  // proc.signal(9)` would be true again (a NEW child is now running) and
+  // SIGKILL the wrong process.
+  property int _readArmedPid: 0
+  property int _actionArmedPid: 0
+  property int _updateCheckArmedPid: 0
 
   function _redact(value) {
     return Model.redact(String(value || ""))
@@ -799,13 +811,20 @@ Item {
     id: readKillTimer
     interval: 1000
     repeat: false
-    onTriggered: { if (readProcess.running) readProcess.signal(9) }
+    // N2: only escalate against the SAME process this timer was armed for
+    // -- `readProcess.processId` at fire time might belong to a DIFFERENT
+    // (later) child if the one that triggered the watchdog already exited
+    // and the queue started the next read before this timer fired.
+    onTriggered: {
+      if (readProcess.running && readProcess.processId === root._readArmedPid) readProcess.signal(9)
+    }
   }
 
   Process {
     id: readProcess
     command: []
     running: false
+    onStarted: { root._readArmedPid = processId }
     stdout: SplitParser {
       onRead: function(line) { root._appendReadOutput(line, false) }
     }
@@ -819,6 +838,7 @@ Item {
     // (which all key off exitCode !== 0) needs no separate crash-aware path.
     onExited: function(exitCode, exitStatus) {
       readWatchdog.stop()
+      readKillTimer.stop()
       var kind = root._readKind
       root._readKind = ""
       if (root._readWatchdogFired) {
@@ -898,7 +918,10 @@ Item {
     id: actionKillTimer
     interval: 1000
     repeat: false
-    onTriggered: { if (actionProcess.running) actionProcess.signal(9) }
+    // N2: same guard as readKillTimer above.
+    onTriggered: {
+      if (actionProcess.running && actionProcess.processId === root._actionArmedPid) actionProcess.signal(9)
+    }
   }
 
   Process {
@@ -916,6 +939,7 @@ Item {
     // C): write() then stdinEnabled = false delivers EOF, a following read
     // sees 0 bytes.
     onStarted: {
+      root._actionArmedPid = processId
       if (secret.length > 0) {
         var value = secret
         secret = ""
@@ -932,6 +956,7 @@ Item {
     }
     onExited: function(exitCode, exitStatus) {
       actionWatchdog.stop()
+      actionKillTimer.stop()
       var label = actionProcess.label
       var success = false
       if (root._actionWatchdogFired) {
@@ -985,7 +1010,10 @@ Item {
     id: updateCheckKillTimer
     interval: 1000
     repeat: false
-    onTriggered: { if (updateCheckProcess.running) updateCheckProcess.signal(9) }
+    // N2: same guard as readKillTimer above.
+    onTriggered: {
+      if (updateCheckProcess.running && updateCheckProcess.processId === root._updateCheckArmedPid) updateCheckProcess.signal(9)
+    }
   }
 
   // T2: deliberately separate from readProcess/actionProcess -- see the
@@ -994,6 +1022,7 @@ Item {
     id: updateCheckProcess
     command: []
     running: false
+    onStarted: { root._updateCheckArmedPid = processId }
     stdout: SplitParser {
       onRead: function(line) { root._appendUpdateCheckOutput(line, false) }
     }
@@ -1002,6 +1031,7 @@ Item {
     }
     onExited: function(exitCode, exitStatus) {
       updateCheckWatchdog.stop()
+      updateCheckKillTimer.stop()
       var timedOutOrOverflowed = root._updateCheckWatchdogFired || root._updateCheckOverflowed
       root._updateCheckWatchdogFired = false
       if (timedOutOrOverflowed) {
