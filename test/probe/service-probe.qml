@@ -2,13 +2,14 @@ import QtQuick
 import Quickshell
 
 // test/probe/service-probe.qml -- deterministic mock-CLI probe for
-// Service.qml (exchange/23-s10-native-process-spec.md). A ShellRoot that
-// Loaders the real Service.qml (never a copy), waits for the initial read
-// queue to drain, drives login("1234567890123456"), then prints ONE
-// "PROBE_RESULT {...}" JSON line to stdout and quits. test/probe/run drives
-// this once per MULLVAD_MOCK_MODE (ok/hang/flood/fail) with
-// PATH=test/mocks:$PATH so every `mullvad` invocation resolves to the mock
-// -- this file never talks to the real daemon.
+// Service.qml (exchange/23-s10-native-process-spec.md, extended by N6 in
+// exchange/25-fable-review-s10.md). A ShellRoot that Loaders the real
+// Service.qml (never a copy), waits for the initial read queue to drain,
+// then drives one of a few scenarios selected by env vars test/probe/run
+// sets per invocation, and prints one "PROBE_RESULT {...}" JSON line to
+// stdout and quits. test/probe/run drives this once per scenario with
+// PATH=test/mocks:$PATH so every `mullvad`/`checkupdates` invocation
+// resolves to a mock -- this file never talks to the real daemon.
 //
 // Written to run unchanged against BOTH the pre-rework and post-rework
 // Service.qml: debug counters (`_readWatchdogFiredCount` etc.) only exist
@@ -28,6 +29,14 @@ ShellRoot {
   // this file never needs a relative upward traversal.
   property string pluginDir: Quickshell.env("MULLVAD_PLUGIN_DIR")
 
+  // N6 (25-fable-review-s10.md): which extra scenario to drive after the
+  // initial read queue drains, selected per test/probe/run invocation.
+  // Exactly one of these is ever true for a given run (test/probe/run never
+  // sets more than one).
+  property bool doubleLogin: Quickshell.env("MULLVAD_PROBE_DOUBLE_LOGIN") === "1"
+  property bool actionOnly: Quickshell.env("MULLVAD_PROBE_ACTION_ONLY") === "1"
+  property bool checkUpdatesMode: Quickshell.env("MULLVAD_PROBE_CHECK_UPDATES") === "1"
+
   Loader {
     id: loader
     source: "file://" + probeRoot.pluginDir + "/Service.qml"
@@ -35,12 +44,14 @@ ShellRoot {
     onLoaded: {
       probeRoot.service = item
       probeRoot.hasDebugCounters = ("_readWatchdogFiredCount" in item)
-      // Short-circuit the production defaults so the hang-mode test doesn't
-      // take the full 10s/20s real deadlines (23-s10-native-process-spec.md
-      // "Timing"). No-op against the pre-rework Service.qml, which doesn't
-      // have these properties yet.
+      // Short-circuit the production defaults so the hang-mode/action-hang/
+      // updatecheck-hang tests don't take the full 10s/20s/130s real
+      // deadlines (23-s10-native-process-spec.md "Timing"; updateCheckTimeoutMs
+      // gained the same probe-shortenable treatment in N6). No-op against
+      // the pre-rework Service.qml, which doesn't have these properties yet.
       if ("readTimeoutMs" in item) item.readTimeoutMs = 1500
-      if ("actionTimeoutMs" in item) item.actionTimeoutMs = 3000
+      if ("actionTimeoutMs" in item) item.actionTimeoutMs = 1500
+      if ("updateCheckTimeoutMs" in item) item.updateCheckTimeoutMs = 1200
       settleTimer.start()
     }
   }
@@ -53,43 +64,95 @@ ShellRoot {
     id: settleTimer
     interval: 150
     repeat: false
-    onTriggered: drainTimer.start()
+    onTriggered: probeRoot._drainThen(probeRoot.afterReadsDrained)
   }
 
+  // Generic "wait until the action/read queue is idle, then run a callback"
+  // helper -- N6 replaces the old fixed two-step (drain reads, drain one
+  // login) with a small chain of steps that varies per scenario (see
+  // afterReadsDrained below), so one reusable Timer replaces what would
+  // otherwise be one bespoke Timer per step.
+  property var _afterBusy: null
+
   Timer {
-    id: drainTimer
+    id: busyDrainTimer
     interval: 100
     repeat: true
     onTriggered: {
       probeRoot.elapsedMs += interval
       if (!probeRoot.service.busy) {
-        drainTimer.stop()
-        probeRoot.afterReadsDrained()
+        busyDrainTimer.stop()
+        var cb = probeRoot._afterBusy
+        probeRoot._afterBusy = null
+        if (cb) cb()
       } else if (probeRoot.elapsedMs > 20000) {
-        drainTimer.stop()
-        probeRoot.finish("read queue did not drain within 20s")
+        busyDrainTimer.stop()
+        probeRoot.finish("queue did not drain within 20s")
       }
     }
   }
 
+  function _drainThen(cb) {
+    elapsedMs = 0
+    _afterBusy = cb
+    busyDrainTimer.start()
+  }
+
+  // N1 (25-fable-review-s10.md): the "ok" scenario performs an action
+  // (connect) BEFORE logging in, then logs in TWICE -- proving stdin reuse
+  // across actions (without the fix, only the first action's stdin write
+  // ever reaches a live pipe; every later one writes into a stdin the
+  // previous action's `onStarted` already closed). The "action-hang"
+  // scenario performs ONLY connect (it exists to exercise the action
+  // watchdog in isolation; a subsequent login would just overwrite the
+  // watchdog-time lastError with its own success text). Every other
+  // scenario (fail/hang/flood) keeps the original single-login shape.
   function afterReadsDrained() {
     elapsedMs = 0
-    service.login("1234567890123456")
-    loginDrainTimer.start()
+    if (actionOnly) {
+      service.connectTunnel()
+      _drainThen(afterActions)
+    } else if (doubleLogin) {
+      service.connectTunnel()
+      _drainThen(function() {
+        service.login("1234567890123456")
+        _drainThen(function() {
+          service.login("1234567890123456")
+          _drainThen(afterActions)
+        })
+      })
+    } else {
+      service.login("1234567890123456")
+      _drainThen(afterActions)
+    }
+  }
+
+  // N6: updateCheckProcess is a separate process/timer from the read/action
+  // queue (never counted in `busy`), so it is driven as its own step after
+  // the queue-based scenario above finishes, only when test/probe/run asked
+  // for it.
+  function afterActions() {
+    if (checkUpdatesMode) {
+      service.checkForUpdates()
+      elapsedMs = 0
+      updateCheckDrainTimer.start()
+    } else {
+      finish("")
+    }
   }
 
   Timer {
-    id: loginDrainTimer
+    id: updateCheckDrainTimer
     interval: 100
     repeat: true
     onTriggered: {
       probeRoot.elapsedMs += interval
-      if (!probeRoot.service.busy) {
-        loginDrainTimer.stop()
+      if (probeRoot.service.updateCheckStatus !== "checking") {
+        updateCheckDrainTimer.stop()
         probeRoot.finish("")
-      } else if (probeRoot.elapsedMs > 20000) {
-        loginDrainTimer.stop()
-        probeRoot.finish("login action did not drain within 20s")
+      } else if (probeRoot.elapsedMs > 10000) {
+        updateCheckDrainTimer.stop()
+        probeRoot.finish("update check did not settle within 10s")
       }
     }
   }
@@ -114,6 +177,10 @@ ShellRoot {
       readOverflowCount: debugProp("_readOverflowCount"),
       actionOverflowCount: debugProp("_actionOverflowCount"),
       readOutputChars: debugProp("_readOutputChars"),
+      packagesLength: (service.packages || []).length,
+      updateCheckStatus: service.updateCheckStatus,
+      updateTargetsLength: (service.updateTargets || []).length,
+      updateCheckWatchdogFiredCount: debugProp("_updateCheckWatchdogFiredCount"),
       note: note
     }
     console.log("PROBE_RESULT " + JSON.stringify(summary))

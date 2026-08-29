@@ -19,15 +19,17 @@ Item {
   // the wrapper's own bash-semantics bugs (the orphaned listener, D2; the
   // empty stdin on `account login`, exchange/22) are the entire reason this
   // exists. Deadlines are enforced here instead, one Timer-driven watchdog
-  // per process. readTimeoutMs/actionTimeoutMs are plain (non-QML-readonly)
-  // properties, like every other mutable-but-externally-read state in this
-  // file (e.g. `installed` below) -- exposed so test/probe/service-probe.qml
-  // can shorten them (the hang-mode test does not need to wait out the real
-  // 10s/20s deadlines). updateCheckTimeoutMs has no such need (nothing in
-  // the probe suite exercises it) so it stays a plain constant.
+  // per process. readTimeoutMs/actionTimeoutMs/updateCheckTimeoutMs are
+  // plain (non-QML-readonly) properties, like every other mutable-but-
+  // externally-read state in this file (e.g. `installed` below) -- exposed
+  // so test/probe/service-probe.qml can shorten them (N6,
+  // 25-fable-review-s10.md: the probe now also drives updateCheckProcess's
+  // own watchdog directly, so its deadline needs to be probe-shortenable
+  // too, exactly like the read/action ones already were). Production
+  // defaults are unchanged.
   property int readTimeoutMs: 10000
   property int actionTimeoutMs: 20000
-  readonly property int updateCheckTimeoutMs: 130000
+  property int updateCheckTimeoutMs: 130000
   // T2 (16-s8-feedback-spec.md): System-tab helper scripts, resolved via
   // Qt.resolvedUrl() relative to this file, same as installScript below.
   readonly property string packageInfoScript: String(Qt.resolvedUrl("scripts/mullvad-package-info")).replace(/^file:\/\//, "")

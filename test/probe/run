@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 # test/probe/run -- deterministic mock-CLI probe suite for the S10 Process
-# rework (exchange/23-s10-native-process-spec.md). Runs
-# test/probe/service-probe.qml once per MULLVAD_MOCK_MODE (ok/hang/flood/
-# fail) via `qs -n -p ...` with PATH shadowed so every `mullvad` invocation
-# resolves to test/mocks/mullvad -- NEVER the real daemon (no Wayland IPC to
-# a running shell is touched; `qs -n` is a standalone, throwaway QML engine
-# instance). Skips with a notice (exit 0) if no `qs` binary / Wayland
-# session is available, per this project's test/all convention.
+# rework (exchange/23-s10-native-process-spec.md) and its N6 fix-pass
+# additions (exchange/25-fable-review-s10.md). Runs
+# test/probe/service-probe.qml once per scenario via `qs -n -p ...` with
+# PATH shadowed so every `mullvad`/`checkupdates` invocation resolves to
+# test/mocks/-- NEVER the real daemon (no Wayland IPC to a running shell is
+# touched; `qs -n` is a standalone, throwaway QML engine instance).
+# PACMAN_LOCAL_DIR also points at a fixture pacman tree
+# (test/fixtures/pacman-local) so scripts/mullvad-package-info never reads
+# this box's real installed-package database either. Skips with a notice
+# (exit 0) if no `qs` binary / Wayland session is available, per this
+# project's test/all convention.
 #
 # Output goes to files (never a pipe -- block-buffering under `qs` swallows
 # console.log otherwise, navi-omarchy-plugin-dev skill).
@@ -27,16 +31,32 @@ if ! command -v qs >/dev/null 2>&1; then
   exit 0
 fi
 
-run_mode() {
-  local mode="$1"
-  local log="$OUT_DIR/$mode.log"
-  local mocklog="$OUT_DIR/$mode.mock.log"
+# run_scenario <label> <VAR=val>... -- runs the probe once, with every
+# trailing VAR=val argument exported alongside the fixed env below. `label`
+# is only ever a filename/log key; the caller passes MULLVAD_MOCK_MODE (and
+# any MULLVAD_PROBE_*/MOCK_MODE overrides) explicitly so scenario naming
+# never has to double as CLI-mock-mode naming (N6 needs more scenarios than
+# mock modes: e.g. two of the four updatecheck scenarios below share
+# MULLVAD_MOCK_MODE=ok).
+run_scenario() {
+  local label="$1"; shift
+  local log="$OUT_DIR/$label.log"
+  local mocklog="$OUT_DIR/$label.mock.log"
   : > "$mocklog"
-  MULLVAD_MOCK_MODE="$mode" MULLVAD_MOCK_LOG="$mocklog" \
+  # env, not a bare prefix-assignment list: "$@"'s expansion isn't visible to
+  # bash's parser at the point it decides what counts as a `NAME=value`
+  # prefix assignment (only literal, unexpanded words qualify), so a plain
+  # `"$@" timeout ...` treats the FIRST expanded word as the command name
+  # instead (measured while writing this: "MULLVAD_MOCK_MODE=ok: command
+  # not found"). `env` parses its own argv for `NAME=value` pairs at
+  # runtime, so it has no such restriction.
+  env MULLVAD_MOCK_LOG="$mocklog" \
     MULLVAD_PLUGIN_DIR="$PLUGIN_DIR" \
+    PACMAN_LOCAL_DIR="$PLUGIN_DIR/test/fixtures/pacman-local" \
     PATH="$PLUGIN_DIR/test/mocks:$PATH" \
+    "$@" \
     timeout 30 qs -n -p "$PLUGIN_DIR/test/probe/service-probe.qml" > "$log" 2>&1
-  echo "$?" > "$OUT_DIR/$mode.exit"
+  echo "$?" > "$OUT_DIR/$label.exit"
   echo "$log"
 }
 
@@ -57,6 +77,8 @@ field() {
 # Kills any mock PID that (a) this run's mock log recorded and (b) is still
 # alive after the qs process exited -- an orphan by definition, and counted
 # as a failure regardless of what else passed (never silently swept aside).
+# Shared by both test/mocks/mullvad and test/mocks/checkupdates -- both log
+# "PID=<n> ..." lines to the same $MULLVAD_MOCK_LOG in the same format.
 check_no_orphans() {
   local mocklog="$1" label="$2"
   local pids leaked=0
@@ -77,12 +99,18 @@ check_no_orphans() {
   fi
 }
 
-login_received_len() {
-  grep -o 'login-received-len=[0-9]*' "$1" | tail -n1 | cut -d= -f2
+login_received_len_count() {
+  # <mocklog> <n> -- count of "login-received-len=<n>" occurrences (the
+  # mock indents this specific line with two leading spaces, unlike its
+  # ARGV/PID lines -- no anchor on leading whitespace). grep -c always
+  # prints exactly one line regardless of exit status (0 matches still
+  # prints "0"), so no `|| echo 0` fallback here -- that pattern double-
+  # prints on a genuine zero-match grep exit status 1.
+  grep -c "login-received-len=$2\$" "$1" 2>/dev/null
 }
 
-echo "== ok mode =="
-log="$(run_mode ok)"
+echo "== ok mode (N1: connect, then login twice -- stdin reuse) =="
+log="$(run_scenario ok MULLVAD_MOCK_MODE=ok MULLVAD_PROBE_DOUBLE_LOGIN=1)"
 json="$(json_line "$log")"
 mocklog="$OUT_DIR/ok.mock.log"
 if [[ -z "$json" ]]; then
@@ -95,9 +123,16 @@ else
   [[ -z "$(field "$json" lastError)" ]] && ok "ok: lastError empty" || not_ok "ok: lastError empty (got: $(field "$json" lastError))"
   loc="$(field "$json" locationsLength)"
   [[ "${loc:-0}" -gt 0 ]] && ok "ok: relay locations parsed ($loc)" || not_ok "ok: relay locations parsed (got $loc)"
-  recv="$(login_received_len "$mocklog")"
-  [[ "$recv" == "16" ]] && ok "ok: mock received exactly 16 stdin chars for login" \
-    || not_ok "ok: mock received exactly 16 stdin chars for login (got: ${recv:-<none>})"
+  # N1 (25-fable-review-s10.md): connectTunnel() runs first (an action that
+  # writes no stdin, but still closes it in onStarted before this fix), then
+  # TWO separate login() calls -- both must receive the full 16-char account
+  # number. Pre-fix, only the FIRST action's stdin write ever lands; every
+  # later login's write() goes into a stdin onStarted already closed once
+  # and never reopened, so the mock reads an empty line and either reports
+  # length 0 or the INVALID_INPUT error text instead.
+  recv16="$(login_received_len_count "$mocklog" 16)"
+  [[ "$recv16" -eq 2 ]] && ok "ok: both logins received exactly 16 stdin chars (stdin reuse after a prior action)" \
+    || not_ok "ok: both logins received exactly 16 stdin chars (got $recv16 occurrences of len=16)"
   [[ "$(field "$json" actionStatus)" == "Logging in complete" ]] && ok "ok: login action completed" \
     || not_ok "ok: login action completed (got: $(field "$json" actionStatus))"
   note="$(field "$json" note)"
@@ -107,7 +142,7 @@ check_no_orphans "$mocklog" "ok"
 
 echo
 echo "== fail mode =="
-log="$(run_mode fail)"
+log="$(run_scenario fail MULLVAD_MOCK_MODE=fail)"
 json="$(json_line "$log")"
 mocklog="$OUT_DIR/fail.mock.log"
 if [[ -z "$json" ]]; then
@@ -128,7 +163,7 @@ check_no_orphans "$mocklog" "fail"
 echo
 echo "== hang mode =="
 start_ts=$(date +%s)
-log="$(run_mode hang)"
+log="$(run_scenario hang MULLVAD_MOCK_MODE=hang)"
 end_ts=$(date +%s)
 elapsed=$((end_ts - start_ts))
 json="$(json_line "$log")"
@@ -169,8 +204,11 @@ fi
 check_no_orphans "$mocklog" "hang"
 
 echo
-echo "== flood mode =="
-log="$(run_mode flood)"
+echo "== flood mode (N6: streaming flood, never exits on its own) =="
+start_ts=$(date +%s)
+log="$(run_scenario flood MULLVAD_MOCK_MODE=flood)"
+end_ts=$(date +%s)
+elapsed=$((end_ts - start_ts))
 json="$(json_line "$log")"
 mocklog="$OUT_DIR/flood.mock.log"
 if [[ -z "$json" ]]; then
@@ -181,18 +219,13 @@ else
   chars="$(field "$json" readOutputChars)"
   hasCounters="$(field "$json" hasDebugCounters)"
   if [[ -n "$chars" ]]; then
-    # Pre-rework: the existing (unchanged by this suite) cap accounting adds
-    # a 1-char line-separator surcharge that can land 1 over the nominal cap
-    # -- a pre-existing off-by-one, not introduced here, tolerated only for
-    # the pre-rework baseline. Post-rework (hasDebugCounters=true) the S10
-    # helper is exact: strictly <= the nominal cap.
     if [[ "$hasCounters" == "true" ]]; then
       cap_limit=262144
     else
       cap_limit=262145
     fi
-    [[ "$chars" -le "$cap_limit" ]] && ok "flood: _readOutputChars bounded at or under the cap ($chars <= $cap_limit)" \
-      || not_ok "flood: _readOutputChars bounded at or under the cap (got $chars, limit $cap_limit)"
+    [[ "$chars" -le "$cap_limit" ]] && ok "flood: retained _readOutputChars bounded at or under the cap ($chars <= $cap_limit)" \
+      || not_ok "flood: retained _readOutputChars bounded at or under the cap (got $chars, limit $cap_limit)"
   else
     echo "  (pre-rework Service.qml: _readOutputChars not exposed yet -- capping verified via wrapper head -c instead)"
   fi
@@ -201,8 +234,99 @@ else
     [[ "${overflow:-0}" -ge 1 ]] && ok "flood: readOverflowCount >= 1 ($overflow)" \
       || not_ok "flood: readOverflowCount >= 1 (got $overflow)"
   fi
+  # N6: this mock mode never exits on its own (an infinite loop) -- the only
+  # way the whole qs run finishes this quickly is Service.qml actually
+  # killing it. Generous bound (well above the ~1.5-2.5s the short probe
+  # readTimeoutMs/killTimer need) to absorb qs's own startup/engine-init
+  # overhead without becoming flaky; check_no_orphans below is the real,
+  # PID-exact proof that the mock process itself is gone, not just that the
+  # accounting looks right.
+  [[ "$elapsed" -le 8 ]] && ok "flood: mock brought down promptly, not left streaming (${elapsed}s)" \
+    || not_ok "flood: mock brought down promptly, not left streaming (took ${elapsed}s)"
 fi
 check_no_orphans "$mocklog" "flood"
+
+echo
+echo "== action-hang mode (N6: action watchdog, isolated from the read watchdog) =="
+log="$(run_scenario action-hang MULLVAD_MOCK_MODE=action-hang MULLVAD_PROBE_ACTION_ONLY=1)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/action-hang.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "action-hang: probe printed a PROBE_RESULT line"
+  cat "$log"
+else
+  ok "action-hang: probe printed a PROBE_RESULT line"
+  hasCounters="$(field "$json" hasDebugCounters)"
+  if [[ "$hasCounters" == "true" ]]; then
+    fired="$(field "$json" actionWatchdogFiredCount)"
+    [[ "$fired" == "1" ]] && ok "action-hang: actionWatchdogFiredCount === 1" \
+      || not_ok "action-hang: actionWatchdogFiredCount === 1 (got $fired)"
+    err="$(field "$json" lastError)"
+    [[ "$err" == *"timed out"* ]] && ok "action-hang: lastError mentions \"timed out\" ($err)" \
+      || not_ok "action-hang: lastError mentions \"timed out\" (got: $err)"
+  else
+    not_ok "action-hang: hasDebugCounters (pre-rework Service.qml can't run this scenario meaningfully)"
+  fi
+fi
+check_no_orphans "$mocklog" "action-hang"
+
+echo
+echo "== updateCheck path (N6: checkupdates shadowed, four scenarios) =="
+
+run_updatecheck() {
+  local scenario="$1" mock_mode="$2"
+  local label="updatecheck-$scenario"
+  local log json mocklog
+  log="$(run_scenario "$label" MULLVAD_MOCK_MODE=ok MOCK_MODE="$mock_mode" MULLVAD_PROBE_CHECK_UPDATES=1)"
+  json="$(json_line "$log")"
+  mocklog="$OUT_DIR/$label.mock.log"
+  if [[ -z "$json" ]]; then
+    not_ok "updatecheck-$scenario: probe printed a PROBE_RESULT line"
+    cat "$log"
+    check_no_orphans "$mocklog" "updatecheck-$scenario"
+    return
+  fi
+  ok "updatecheck-$scenario: probe printed a PROBE_RESULT line"
+  local hasCounters status targets fired packages
+  hasCounters="$(field "$json" hasDebugCounters)"
+  status="$(field "$json" updateCheckStatus)"
+  targets="$(field "$json" updateTargetsLength)"
+  fired="$(field "$json" updateCheckWatchdogFiredCount)"
+  packages="$(field "$json" packagesLength)"
+  [[ "${packages:-0}" -ge 1 ]] && ok "updatecheck-$scenario: fixture packages populated ($packages)" \
+    || not_ok "updatecheck-$scenario: fixture packages populated (got $packages -- checkForUpdates() would have refused to run)"
+  case "$scenario" in
+    none)
+      [[ "$status" == "ok" ]] && ok "updatecheck-none: updateCheckStatus=ok" || not_ok "updatecheck-none: updateCheckStatus=ok (got $status)"
+      [[ "${targets:-0}" -eq 0 ]] && ok "updatecheck-none: no update targets" || not_ok "updatecheck-none: no update targets (got $targets)"
+      ;;
+    updates)
+      [[ "$status" == "ok" ]] && ok "updatecheck-updates: updateCheckStatus=ok" || not_ok "updatecheck-updates: updateCheckStatus=ok (got $status)"
+      [[ "${targets:-0}" -ge 1 ]] && ok "updatecheck-updates: update targets parsed ($targets)" || not_ok "updatecheck-updates: update targets parsed (got $targets)"
+      ;;
+    offline)
+      [[ "$status" == "unavailable" ]] && ok "updatecheck-offline: updateCheckStatus=unavailable" || not_ok "updatecheck-offline: updateCheckStatus=unavailable (got $status)"
+      if [[ "$hasCounters" == "true" ]]; then
+        [[ "${fired:-0}" -eq 0 ]] && ok "updatecheck-offline: watchdog did not fire ($fired)" || not_ok "updatecheck-offline: watchdog did not fire (got $fired)"
+      fi
+      ;;
+    hang)
+      [[ "$status" == "unavailable" ]] && ok "updatecheck-hang: updateCheckStatus=unavailable" || not_ok "updatecheck-hang: updateCheckStatus=unavailable (got $status)"
+      if [[ "$hasCounters" == "true" ]]; then
+        [[ "${fired:-0}" -ge 1 ]] && ok "updatecheck-hang: updateCheckWatchdogFiredCount >= 1 ($fired)" \
+          || not_ok "updatecheck-hang: updateCheckWatchdogFiredCount >= 1 (got $fired)"
+      else
+        echo "  (pre-rework Service.qml: no updateCheckWatchdog counter yet)"
+      fi
+      ;;
+  esac
+  check_no_orphans "$mocklog" "updatecheck-$scenario"
+}
+
+run_updatecheck none none
+run_updatecheck updates updates
+run_updatecheck offline offline
+run_updatecheck hang hang
 
 echo
 if [[ "$fail_count" -eq 0 ]]; then

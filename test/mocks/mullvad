@@ -13,13 +13,21 @@
 #            exchange/22-login-stdin-bug.md).
 #   hang  -- every invocation sleeps 600s; must be killed by Service.qml's
 #            watchdog, never by anything in this script.
-#   flood -- every invocation prints 10 MB of `x` with no newlines, then one
-#            trailing newline; must trip Service.qml's total-output-chars cap
-#            and get signalled, not run to completion.
+#   flood -- every invocation loops forever, writing 64 KiB chunks of `x`
+#            with NO newline ever (N6, 25-fable-review-s10.md: a genuine
+#            streaming flood that never exits on its own, unlike a one-shot
+#            bounded dump -- the only way it ends is Service.qml's
+#            watchdog/overflow-cap logic actually killing it, which is
+#            exactly what this mode exists to prove).
 #   fail  -- `mullvad --version` still succeeds (so `installed` stays true and
 #            the read queue keeps going -- this is what "queue continues"
 #            means in the probe assertions); every other subcommand,
 #            including `account login`, exits 2 with stderr text.
+#   action-hang -- every READ succeeds exactly like `ok`; only `connect`
+#            sleeps 600s (N6: exercises Service.qml's actionWatchdog
+#            specifically, as distinct from the read-side `hang` mode above,
+#            which hangs the very first read and never lets `installed`
+#            become true at all).
 #
 # If $MULLVAD_MOCK_LOG is set, every invocation appends its argv and the
 # `command -v mullvad` resolution to that file -- test/probe/run greps it to
@@ -43,12 +51,19 @@ case "$MODE" in
     exec sleep 600
     ;;
   flood)
-    # 10 MiB of 'x', no newlines, then one trailing newline.
-    head -c 10485760 /dev/zero | tr '\0' 'x'
-    echo
-    exit 0
+    # 64 KiB chunks of 'x', no newline, forever -- built once, then printed
+    # in a loop via a bash builtin (no per-iteration fork). Quickshell keeps
+    # draining the pipe (SplitParser buffers looking for a newline that
+    # never comes) so this never blocks; the only way it stops is being
+    # signalled from outside.
+    chunk="$(head -c 65536 /dev/zero | tr '\0' 'x')"
+    while true; do printf '%s' "$chunk"; done
     ;;
 esac
+
+if [[ "$MODE" == "action-hang" && "$*" == "connect" ]]; then
+  exec sleep 600
+fi
 
 # --- account login: reads exactly one stdin line ----------------------------
 if [[ "${1:-}" == "account" && "${2:-}" == "login" ]]; then
