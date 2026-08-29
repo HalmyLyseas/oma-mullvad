@@ -238,6 +238,16 @@ file — a plain hot-reload will not pick it up.
   (`test/fixtures/cli/listen-scripts/`): connect, tunnel-drop, lockdown
   block, daemon-restart-respawn, and garbage/over-long lines, plus the
   poll-vs-listener race (`MULLVAD_MOCK_STATUS_DELAY_MS`/`_TRIGGER`).
+- `test/probe/run-ui` instantiates the real `BarWidget.qml`/`Panel.qml`
+  against a stub `bar`/`shell` covering the bar-widget README's injected
+  surface, with `QML_IMPORT_PATH` pointed at a scratch `qs` symlink to
+  `/usr/share/omarchy/shell` so `import qs.Ui`/`qs.Commons` resolve. Drives
+  page locking, the Ownership dropdown's live binding, Excluded-tab
+  rendering, and the svc null/recreate lifecycle; fails on any
+  TypeError/ReferenceError in the log. `BarWidget._debugPanelItem/
+  _debugPanelActive/_debugPanelStatus` and `Panel._debugPageItem` are
+  debug-only aliases that exist solely so this probe can observe the
+  Loader lifecycle without opening a real popup window.
 - `test/cli-contract.mjs` runs the real local `mullvad` CLI, read-only
   subcommands only, asserting `Model.js`'s parsers accept the live output
   shape and never surface an account number.
