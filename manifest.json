@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "halmylyseas.mullvad",
   "name": "Mullvad",
-  "version": "1.3.6",
+  "version": "1.4.0",
   "author": "kallupx",
   "license": "MIT",
   "description": "A theme-aware Mullvad VPN control and status widget for the Omarchy bar.",

@@ -56,7 +56,7 @@ Four `Process` objects, one contract each (`Service.qml`):
 |---|---|---|---|---|
 | `readProcess` (queue) | `Model.argv(...)` read verbs, direct | `readTimeoutMs` (default 10 s), one watchdog per queued read | per-line slice + total lines (4096) / chars (262144); breach stops appending, signals the child, marks the read `overflowed` (treated as a failure) | none |
 | `actionProcess` (queue) | `Model.argv(...)` mutating verbs, direct | `actionTimeoutMs` (default 20 s) | same caps | `account login` only: `onStarted` → `write(number + "\n")`, clear the secret, then `stdinEnabled = false` (EOF). Reset back to `true` at ARM time so a later action's `write()` isn't silently lost to a stdin a previous action already closed. |
-| `listenerProcess` | `["mullvad","status","--json","listen"]` | none (long-lived) | per-line slice only (`listenerLineChars`) | none |
+| `listenerProcess` | `["mullvad","status","--json","listen"]` | none (long-lived); respawns after `listenerRestartMs` (default 5 s) on exit | per-line slice only (`listenerLineChars`) | none |
 | `updateCheckProcess` | `[updateCheckScript]` — `scripts/mullvad-update-check` stays a bash script (wraps `checkupdates`, not the Mullvad CLI) | `updateCheckTimeoutMs` (default 130 s, probe-shortenable like the other two) | same caps | none |
 
 **Watchdog pattern**: one `Timer` per process, interval assigned
@@ -112,6 +112,29 @@ arrives, so an adversarial child writing an unbounded stream with none
 would have its output buffered by Quickshell itself before this plugin's
 caps see a byte. Accepted: the source is the local, root-installed
 `mullvad` CLI, and every real line it emits is a few hundred bytes at most.
+
+## State truthfulness: icon, and the poll/listener race
+
+`Service.qml` exposes a public `readonly property string stateIcon`
+(connecting/connected/disconnected/error/warning) so the icon shown is
+testable without any UI; `BarWidget.qml` just binds `svc ? svc.stateIcon :
+"connecting"`. Two status sources feed the same state: the periodic poll
+(`status --json`) and the long-lived listener (`status --json listen`).
+A slow poll started before a listener event must not overwrite it on
+arrival — fixed with a monotonically increasing `_statusSeq`: each source
+captures its own seq when it *starts* (poll: at `_startNextRead`; listener:
+per received line) and `_applyStatus` only applies a result whose seq is
+not older than the last one actually applied. Measured without the guard:
+a slow poll returning stale `disconnected` reliably overwrote a
+just-arrived `connected` from the listener (`test/probe/run`'s `race`
+scenario, mock `status --json` delayed via `MULLVAD_MOCK_STATUS_DELAY_MS`/
+`_TRIGGER`); with the guard, the listener's value always wins.
+
+The listener also validates JSON itself before calling `_applyStatus` —
+`Model.parseStatus` never throws on unparseable input, it silently maps to
+`"unknown"`, which would otherwise flash a false status on a garbage or
+truncated (`listenerLineChars`-capped) line. `listenerRestartMs` (default
+5 s, probe-shortenable) gates the respawn delay after the listener exits.
 
 ## Why no shell wrapper
 
@@ -208,6 +231,13 @@ file — a plain hot-reload will not pick it up.
   runner asserts against, including that no mock process is left running.
   `PACMAN_LOCAL_DIR` points at a fixture pacman tree. Skips itself if no
   `qs`/Wayland session is available. Never touches the real daemon.
+- The mock listener also supports a scripted mode:
+  `MULLVAD_MOCK_LISTEN_SCRIPT=<file>`, one `<delay-ms> <payload>` line each
+  (`EXIT <code>`/`STDERR <text>` payloads end the stream or write to
+  stderr), for the state-truthfulness matrix in `test/probe/run`
+  (`test/fixtures/cli/listen-scripts/`): connect, tunnel-drop, lockdown
+  block, daemon-restart-respawn, and garbage/over-long lines, plus the
+  poll-vs-listener race (`MULLVAD_MOCK_STATUS_DELAY_MS`/`_TRIGGER`).
 - `test/cli-contract.mjs` runs the real local `mullvad` CLI, read-only
   subcommands only, asserting `Model.js`'s parsers accept the live output
   shape and never surface an account number.
