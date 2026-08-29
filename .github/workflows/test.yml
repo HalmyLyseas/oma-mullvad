@@ -17,7 +17,7 @@ jobs:
       - name: Install git
         run: pacman -Sy --noconfirm git
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Trust the checkout (container runs as root, workspace is owned by the runner uid)
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
