@@ -358,6 +358,31 @@ Panel {
     confirmDialog.opened = true
   }
 
+  // S9 (19-s9-install-prompt-spec.md): shared by the Overview "unavailable"
+  // card and the System tab's UPDATES row, both of which surface the same
+  // action. installScript is resolved in Service.qml the same way as
+  // packageInfoScript; the launch mechanism mirrors Omarchy's own menu
+  // "Install > Service" entries (omarchy-menu.jsonc's install.service.*
+  // actions, e.g. omarchy-install-service-nordvpn), which run their
+  // installer the same way: a floating terminal launching a single script
+  // via omarchy-launch-floating-terminal-with-presentation.
+  function installActionLabel() {
+    return !service.installed ? "Install Mullvad VPN" : "Enable the Mullvad daemon"
+  }
+
+  function installConfirmMessage() {
+    return !service.installed
+      ? "Install Mullvad VPN? A terminal will open, install the mullvad-vpn package from the Arch repositories and enable the mullvad-daemon service. You will be asked for your sudo password."
+      : "Enable the Mullvad daemon? A terminal will open and enable the mullvad-daemon service. You will be asked for your sudo password."
+  }
+
+  function runInstallAction() {
+    root.confirmAction(root.installConfirmMessage(), function() {
+      Quickshell.execDetached(["omarchy-launch-floating-terminal-with-presentation", Util.shellQuote(service.installScript)])
+      root.close()
+    })
+  }
+
   function syncInlineSettings() {
     if (syncingSettings) return
     syncingSettings = true
@@ -666,12 +691,11 @@ Panel {
             text: service.state === "checking"
               ? "Checking for Mullvad VPN…"
               : !service.installed
-              // T1 (16-s8-feedback-spec.md): the old AUR-install prose was
-              // removed by an earlier pass; this replaces it with a link to
-              // the safe, official Arch `extra`-repo package page instead
-              // of ever running an installer for the user.
-              ? "Mullvad CLI was not found. Install the mullvad-vpn package from the Arch extra repository (no AUR needed), then press refresh."
-              : "The Mullvad daemon is unavailable. Start mullvad-daemon, then press refresh."
+              // S9 (19-s9-install-prompt-spec.md): superseded T1's link-only
+              // prose -- the panel now also offers a real install prompt via
+              // Omarchy's own mechanism (the button below), never the AUR.
+              ? "Mullvad CLI was not found."
+              : "The Mullvad daemon is not running."
             color: root.urgent
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
@@ -685,6 +709,26 @@ Panel {
             focusable: true
             foreground: root.foreground
             onClicked: Quickshell.execDetached(["xdg-open", Model.ARCH_PACKAGE_URL])
+          }
+
+          Button {
+            visible: !service.installed || !service.daemonRunning
+            text: root.installActionLabel()
+            bordered: true
+            focusable: true
+            foreground: root.foreground
+            onClicked: root.runInstallAction()
+          }
+
+          Text {
+            textFormat: Text.PlainText
+            visible: !service.installed || !service.daemonRunning
+            width: parent.width
+            text: "After the terminal finishes, this panel refreshes by itself."
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            wrapMode: Text.WordWrap
           }
         }
       }
@@ -1669,6 +1713,14 @@ Panel {
           focusable: true
           foreground: root.foreground
           onClicked: Quickshell.execDetached(["xdg-open", Model.ARCH_PACKAGE_URL])
+        }
+        Button {
+          visible: !service.installed || !service.daemonRunning
+          text: root.installActionLabel()
+          bordered: true
+          focusable: true
+          foreground: root.foreground
+          onClicked: root.runInstallAction()
         }
       }
     }

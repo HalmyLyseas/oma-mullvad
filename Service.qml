@@ -19,6 +19,13 @@ Item {
   // same way as commandGuard above.
   readonly property string packageInfoScript: String(Qt.resolvedUrl("scripts/mullvad-package-info")).replace(/^file:\/\//, "")
   readonly property string updateCheckScript: String(Qt.resolvedUrl("scripts/mullvad-update-check")).replace(/^file:\/\//, "")
+  // S9 (19-s9-install-prompt-spec.md): resolved path to the sole script
+  // allowed to contain package-manager/service-manager/sudo literals. Never
+  // spawned directly by this service -- only Panel.qml reads this property
+  // to hand it, already shell-quoted, to
+  // omarchy-launch-floating-terminal-with-presentation from behind a
+  // ConfirmDialog.
+  readonly property string installScript: String(Qt.resolvedUrl("scripts/install-mullvad")).replace(/^file:\/\//, "")
 
   property bool installed: false
   property bool daemonRunning: false
