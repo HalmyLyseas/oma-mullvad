@@ -79,14 +79,14 @@ arrayField() {
 
 # Same orphan-kill convention as test/probe/run: any mock PID this run's
 # log recorded that is still alive after `qs` exited is a leaked process.
-# Alive means present AND not a zombie: in a container without an init to
-# reap children, a mock that died with qs lingers as "Z" and kill -0 still
-# succeeds. Give a real straggler up to 2 s to finish exiting first.
 alive() {
   local pid="$1" state
   state="$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null)" || return 1
   [[ -n "$state" && "$state" != "Z" && "$state" != "X" ]]
 }
+# A dead-but-unreaped mock lingers as zombie "Z" where no init reaps it
+# (containers), and kill -0 still succeeds on it -- so state is what
+# counts, and a real straggler gets 2 s to finish exiting.
 settled_alive() {
   local pid="$1" i
   for i in 1 2 3 4 5 6 7 8 9 10; do
