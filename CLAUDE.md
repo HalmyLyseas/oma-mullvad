@@ -36,10 +36,16 @@ panel `Loader` is gated on the service existing: `docs/developers.md`.
    a test that scans every `.qml` file at the plugin root) — remote/relay
    strings are never rendered as rich text.
 4. **No package-manager, service-manager, or privilege-escalation command
-   strings shipped anywhere** — none of the usual Arch/AUR install helpers,
-   none of the usual init-system control verbs, no privilege-elevation
-   wrappers. Prerequisites are prose + links only, never a command the
-   plugin would run for the user.
+   strings shipped anywhere, EXCEPT `scripts/install-mullvad`** — no other
+   file may contain an Arch/AUR install helper, an init-system control verb,
+   or a privilege-elevation wrapper. `scripts/install-mullvad` is the single
+   declared exception: it is launched only from a ConfirmDialog-gated button
+   in `Panel.qml`, takes no arguments and receives no data from the CLI or
+   settings, and is the plugin's one declared `privilege` capability (S9,
+   `19-s9-install-prompt-spec.md`) — the same mechanism Omarchy's own menu
+   uses for its "Install > Service" entries. Everywhere else, prerequisites
+   remain prose + links only, never a command the plugin would run for the
+   user.
 5. **Never modify anything under `/usr/share/omarchy/`** (reading is
    encouraged). Never run `omarchy refresh`/`omarchy reinstall`.
 6. Read-only toward the Mullvad daemon during development/testing: never run

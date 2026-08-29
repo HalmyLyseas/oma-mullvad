@@ -264,6 +264,81 @@ is pushed to a fork of `kallupx/oma-mullvad` or a PR is filed. No PR has
 been prepared or filed as part of this pass; this section is preparation
 only.
 
+## Install prompt (privilege capability)
+
+Human feedback after a from-scratch reinstall (`exchange/19-s9-install-prompt-spec.md`)
+superseded the earlier decision to strip the AUR install button
+(`exchange/07-human-gate.md` decision #3): rather than ship no installer at
+all, the panel now offers a real install prompt through **Omarchy's own
+mechanism**, never the AUR and never a raw shell command assembled from
+plugin data.
+
+**Mechanism.** The Overview page's "unavailable" card and the System tab's
+UPDATES row both show an "Install Mullvad VPN" / "Enable the Mullvad
+daemon" button (state-dependent on `!service.installed` /
+`!service.daemonRunning`) behind a `ConfirmDialog`. On confirm, the panel
+runs exactly:
+
+```qml
+Quickshell.execDetached(["omarchy-launch-floating-terminal-with-presentation",
+                         Util.shellQuote(service.installScript)])
+```
+
+This is the identical mechanism Omarchy's own menu uses for its
+"Install > Service" entries — see
+`/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc:218`
+(`install.service.nordvpn`) and its target script
+`omarchy-install-service-nordvpn`, which `scripts/install-mullvad` mirrors
+in shape (`echo "Installing …"`, `omarchy-pkg-add <pkg>`, `echo "Enabling …
+daemon…"`, an idempotent `sudo systemctl enable --now <daemon>`).
+`service.installScript` is a `Service.qml` property resolved the same way
+as `packageInfoScript`/`updateCheckScript` (`Qt.resolvedUrl(...)`, stripped
+of its `file://` prefix); the button never passes any argument or
+plugin-derived data into the command — the script takes none.
+
+**Why the daemon also needs enabling.** The Arch `extra` package
+`mullvad-vpn` (→ `mullvad-vpn-daemon`) does **not** enable the daemon on
+install. Its own `.INSTALL` `post_install` hook only prints:
+
+```
+sudo systemctl enable --now mullvad-daemon
+```
+
+to the terminal — it never runs it. Without `install-mullvad`'s own enable
+step, a fresh install would leave the panel on "daemon unavailable" forever
+until the user read that printed hint and ran it by hand. This is also why
+this pass does not simply call the generic `omarchy-install-app "Mullvad
+VPN" mullvad-vpn` helper (which only wraps `omarchy-pkg-add`, the same as
+`install.editor.vim`'s menu entry): that helper has no notion of a daemon to
+enable afterward, so the service-style script (`omarchy-install-service-*`)
+is the correct precedent to follow, not the plain-app one.
+
+**Idempotency.** `omarchy-pkg-add` is itself a no-op when the package is
+already present; the daemon-enable step is skipped entirely once
+`systemctl is-active --quiet mullvad-daemon` succeeds. Re-running the whole
+script is safe in every state: nothing installed, package present but
+daemon down, or both already present/running.
+
+**Containment.** `scripts/install-mullvad` is the *only* file in this
+plugin allowed to contain a package-manager/service-manager/sudo literal
+(`CLAUDE.md` rule 4) — every other file documents prerequisites in prose
+and links only. `test/scripts.test.sh` exercises it with PATH mocks for
+`omarchy-pkg-add`/`systemctl`/`sudo` (recording invocations to a
+`MOCK_LOG` file) covering: daemon inactive (install then enable, in that
+order), daemon already active (install only, no `sudo` call), and
+`omarchy-pkg-add` failing (script exits non-zero before ever calling
+`systemctl`).
+
+**Marketplace consequence.** This makes the plugin's declared capability
+set `["privilege"]` again, exactly like the upstream `kallupx/oma-mullvad`
+listing (`02-pm-plan.md`'s ground truth: Automated Security Baseline v3
+outcome `review-required`, capability `["privilege"]`, for upstream's own
+AUR-install button) — which passed maintainer review at that outcome. A
+future marketplace update for this fork should expect the same
+`review-required` baseline outcome, not `passed`, and that is the expected,
+correct result for a plugin that ships one declared install action, not a
+regression to fix.
+
 ## Credits
 
 Author: kallupx (upstream OmaMullvad). Fork maintained by HalmyLyseas.

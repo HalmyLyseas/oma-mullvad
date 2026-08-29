@@ -34,7 +34,12 @@ omarchy restart shell
 Requires Mullvad VPN 2026.4 with the daemon running. Install
 [`mullvad-vpn`](https://archlinux.org/packages/extra/x86_64/mullvad-vpn/)
 from the Arch `extra` repository (no AUR needed) — the panel's Overview page
-links to the same page when the CLI isn't found.
+links to the same page when the CLI isn't found, and also offers an
+"Install Mullvad VPN" button that installs the package and enables the
+`mullvad-daemon` service for you, the same way Omarchy's own menu installs
+services like NordVPN or Tailscale: a floating terminal opens, asks for
+your sudo password, and the panel picks up the change on its own once it
+finishes.
 
 ## Controls
 
