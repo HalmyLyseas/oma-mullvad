@@ -1,0 +1,30 @@
+#!/bin/bash
+# scripts/install-mullvad -- the ONLY file in this plugin allowed to contain
+# a package-manager / service-manager / sudo literal (CLAUDE.md rule 4).
+#
+# Launched only from a ConfirmDialog-gated button in Panel.qml, exactly the
+# way Omarchy's own menu launches its "Install > Service" entries
+# (/usr/share/omarchy/default/omarchy/omarchy-menu.jsonc:218, the NordVPN
+# entry, whose own omarchy-install-service-nordvpn this script mirrors in
+# shape): Quickshell.execDetached(["omarchy-launch-floating-terminal-with-
+# presentation", Util.shellQuote(service.installScript)]). It takes no
+# arguments and never receives data derived from the CLI, settings, or any
+# relay/network response -- this is the plugin's sole declared `privilege`
+# capability.
+#
+# Idempotent: omarchy-pkg-add is itself a no-op when the package is already
+# installed, and the daemon-enable step is skipped entirely once
+# mullvad-daemon is already active -- safe to re-run when only the daemon
+# still needs enabling. The enable step is required because the Arch
+# `mullvad-vpn` package's own .INSTALL post_install only PRINTS
+# "sudo systemctl enable --now mullvad-daemon" to the terminal; it does not
+# run it.
+set -euo pipefail
+
+echo "Installing Mullvad VPN..."
+omarchy-pkg-add mullvad-vpn
+
+echo "Enabling Mullvad daemon..."
+if ! systemctl is-active --quiet mullvad-daemon; then
+  sudo systemctl enable --now mullvad-daemon
+fi

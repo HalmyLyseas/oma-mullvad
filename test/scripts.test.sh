@@ -97,6 +97,56 @@ code=$?
 assert_eq "mullvad-update-check (internal timeout) exits 3" "3" "$code"
 assert_eq "mullvad-update-check (internal timeout) prints nothing" "" "$out"
 
+# ----------------------------------------------------------------- install
+
+# scripts/install-mullvad shells out to omarchy-pkg-add / systemctl / sudo --
+# all three PATH-shadowed by test/mocks so no real package/service/sudo
+# command ever runs. MOCK_LOG captures every invocation in call order.
+
+run_install() {
+  local log
+  log="$(mktemp)"
+  MOCK_LOG="$log" PATH="$MOCKS:$PATH" "$PLUGIN_DIR/scripts/install-mullvad" \
+    >/dev/null 2>&1
+  echo "$?"
+  cat "$log"
+  rm -f "$log"
+}
+
+result="$(MOCK_DAEMON_ACTIVE=0 run_install)"
+code="$(echo "$result" | head -n1)"
+log="$(echo "$result" | tail -n+2)"
+assert_eq "install-mullvad (daemon inactive) exits 0" "0" "$code"
+assert_contains "install-mullvad (daemon inactive) calls omarchy-pkg-add mullvad-vpn" "$log" \
+  "omarchy-pkg-add mullvad-vpn"
+assert_contains "install-mullvad (daemon inactive) checks systemctl is-active" "$log" \
+  "systemctl is-active --quiet mullvad-daemon"
+assert_contains "install-mullvad (daemon inactive) enables the daemon via sudo" "$log" \
+  "sudo systemctl enable --now mullvad-daemon"
+pkg_line="$(echo "$log" | grep -n "omarchy-pkg-add" | head -n1 | cut -d: -f1)"
+sudo_line="$(echo "$log" | grep -n "^sudo " | head -n1 | cut -d: -f1)"
+if [[ -n "$pkg_line" && -n "$sudo_line" && "$pkg_line" -lt "$sudo_line" ]]; then
+  ok "install-mullvad (daemon inactive) installs before enabling"
+else
+  not_ok "install-mullvad (daemon inactive) installs before enabling (pkg line $pkg_line, sudo line $sudo_line)"
+fi
+
+result="$(MOCK_DAEMON_ACTIVE=1 run_install)"
+code="$(echo "$result" | head -n1)"
+log="$(echo "$result" | tail -n+2)"
+assert_eq "install-mullvad (daemon active) exits 0" "0" "$code"
+assert_contains "install-mullvad (daemon active) calls omarchy-pkg-add mullvad-vpn" "$log" \
+  "omarchy-pkg-add mullvad-vpn"
+sudo_calls="$(echo "$log" | grep -c "^sudo " || true)"
+assert_eq "install-mullvad (daemon active) never calls sudo" "0" "$sudo_calls"
+
+result="$(MOCK_PKG_ADD_EXIT=1 MOCK_DAEMON_ACTIVE=0 run_install)"
+code="$(echo "$result" | head -n1)"
+log="$(echo "$result" | tail -n+2)"
+assert_eq "install-mullvad (omarchy-pkg-add fails) exits non-zero" "1" "$code"
+systemctl_calls="$(echo "$log" | grep -c "^systemctl " || true)"
+assert_eq "install-mullvad (omarchy-pkg-add fails) never calls systemctl" "0" "$systemctl_calls"
+
 # ------------------------------------------------------------------- summary
 
 echo

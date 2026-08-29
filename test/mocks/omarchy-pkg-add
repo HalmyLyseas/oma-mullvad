@@ -1,0 +1,9 @@
+#!/bin/bash
+# test/mocks/omarchy-pkg-add -- PATH-shadowing mock of Omarchy's own
+# omarchy-pkg-add for scripts/install-mullvad tests. Records its invocation
+# (argv) to $MOCK_LOG (append) and exits $MOCK_PKG_ADD_EXIT (default 0), so
+# tests can simulate the real binary failing (e.g. no network, pacman
+# lock) without ever calling pacman/sudo for real.
+set -uo pipefail
+echo "omarchy-pkg-add $*" >> "${MOCK_LOG:-/dev/null}"
+exit "${MOCK_PKG_ADD_EXIT:-0}"

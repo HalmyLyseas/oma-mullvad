@@ -1,0 +1,21 @@
+#!/bin/bash
+# test/mocks/systemctl -- PATH-shadowing mock of systemctl for
+# scripts/install-mullvad tests. Records its invocation to $MOCK_LOG
+# (append). Only `is-active --quiet mullvad-daemon` is meaningfully
+# emulated, steered by $MOCK_DAEMON_ACTIVE ("1" = active exit 0, anything
+# else = inactive exit 3, matching systemctl's real is-active contract);
+# any other invocation just logs and exits 0.
+set -uo pipefail
+echo "systemctl $*" >> "${MOCK_LOG:-/dev/null}"
+
+if [[ "${1:-}" == "is-active" ]]; then
+  if [[ "${MOCK_DAEMON_ACTIVE:-0}" == "1" ]]; then
+    echo "active"
+    exit 0
+  else
+    echo "inactive"
+    exit 3
+  fi
+fi
+
+exit 0
