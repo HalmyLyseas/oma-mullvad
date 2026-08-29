@@ -267,7 +267,7 @@ Item {
         connected = false
         state = "unavailable"
         statusText = "Mullvad is not installed"
-        lastError = "Mullvad CLI not found. Install Mullvad VPN, then refresh."
+        lastError = "Mullvad CLI not found. Use the install button below, or install the mullvad-vpn package and refresh."
         cliVersion = ""
         if (listenerProcess.running) listenerProcess.running = false
       } else {
@@ -410,7 +410,7 @@ Item {
 
   function _command(action, params) {
     if (!installed) {
-      lastError = "Mullvad CLI not found. Install Mullvad VPN, then refresh."
+      lastError = "Mullvad CLI not found. Use the install button below, or install the mullvad-vpn package and refresh."
       return null
     }
     try {
