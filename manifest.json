@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "id": "halmylyseas.mullvad",
-  "name": "Mullvad",
+  "id": "io.github.kallupx.oma-mullvad",
+  "name": "OmaMullvad",
   "version": "1.4.4",
   "author": "kallupx",
   "license": "MIT",
@@ -16,7 +16,7 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Mullvad VPN",
+    "displayName": "OmaMullvad",
     "description": "Monitor and control Mullvad from a native Omarchy panel.",
     "category": "Network",
     "allowMultiple": false,

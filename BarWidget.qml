@@ -1,4 +1,4 @@
-// BarWidget.qml -- bar entry point for halmylyseas.mullvad. Binds the
+// BarWidget.qml -- bar entry point for io.github.kallupx.oma-mullvad. Binds the
 // machine-wide Service.qml singleton via shell.serviceFor(moduleName) and
 // hosts Panel.qml through a Loader; see docs/developers.md, Architecture.
 import QtQuick
@@ -7,10 +7,10 @@ import qs.Ui
 
 BarWidget {
   id: root
-  moduleName: "halmylyseas.mullvad"
+  moduleName: "io.github.kallupx.oma-mullvad"
 
   readonly property var shell: bar && bar.shell ? bar.shell : null
-  readonly property var svc: shell ? shell.serviceFor("halmylyseas.mullvad") : null
+  readonly property var svc: shell ? shell.serviceFor("io.github.kallupx.oma-mullvad") : null
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent

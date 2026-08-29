@@ -11,7 +11,7 @@ import "Model.js" as Model
 Panel {
   id: root
 
-  moduleName: "halmylyseas.mullvad"
+  moduleName: "io.github.kallupx.oma-mullvad"
   ipcTarget: moduleName
   manageIpc: false
 

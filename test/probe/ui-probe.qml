@@ -31,7 +31,7 @@ ShellRoot {
     property var svcInstance: null
     property var updateEntryInlineCalls: []
     readonly property var appLibrary: stubAppLibrary
-    function serviceFor(id) { return id === "halmylyseas.mullvad" ? stubShell.svcInstance : null }
+    function serviceFor(id) { return id === "io.github.kallupx.oma-mullvad" ? stubShell.svcInstance : null }
     function updateEntryInline(id, entry) {
       stubShell.updateEntryInlineCalls = stubShell.updateEntryInlineCalls.concat([{ id: id, entry: entry }])
     }

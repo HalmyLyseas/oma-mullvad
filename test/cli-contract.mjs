@@ -76,4 +76,4 @@ check(["dns", "get"], output => assert.match(output, /Custom DNS: (yes|no)/));
 check(["anti-censorship", "get"], output => assert.match(output, /mode: (auto|off|wireguard-port|udp2tcp|shadowsocks|quic|lwo)/));
 check(["split-tunnel", "list"], output => assert.match(output, /^Excluded PIDs:/));
 
-console.log("halmylyseas.mullvad 2026.4 read-only CLI contract: ok");
+console.log("io.github.kallupx.oma-mullvad 2026.4 read-only CLI contract: ok");
