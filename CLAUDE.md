@@ -11,6 +11,16 @@ diverge on identity and house rules (own marketplace listing, AUR-install
 button removed) while staying upstreamable: fixes here are meant to be
 PR-able back to kallupx where they apply.
 
+## Architecture
+
+`manifest.json` declares kinds `service` + `bar-widget`. `Service.qml` is a
+machine-wide singleton (one poller/listener/action-queue total, not one per
+monitor); `BarWidget.qml` is the per-monitor bar-slot entry point, resolving
+the singleton via `bar.shell.serviceFor("halmylyseas.mullvad")`; `Panel.qml`
+is the popup, injected with `bar`/`settings`/`anchorItem`/`hostWidget`/
+`service` by `BarWidget.injectPanel()`. Full detail, including why the
+panel `Loader` is gated on the service existing: `docs/developers.md`.
+
 ## Hard rules
 
 1. **The plugin never runs a mutating Mullvad command from remote/derived
