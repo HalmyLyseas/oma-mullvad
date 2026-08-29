@@ -47,7 +47,7 @@ is ever renamed on one side only):
 `settings` directly (a machine-wide singleton has no single owning widget to
 read settings from — see "settings vs. the service" below).
 
-### How the Panel `Loader` avoids a null-service Panel (C3)
+### How the Panel `Loader` avoids a null-service Panel (C3, corrected by N4)
 
 `Panel.qml` reads `service.<property>` unguarded in roughly 150 places (every
 page: Overview, Locations, Advanced, Excluded Apps) — it is written to assume
@@ -57,29 +57,48 @@ page: Overview, Locations, Advanced, Excluded Apps) — it is written to assume
 Through the S6 fix pass this was enforced with `Loader { active: root.svc
 !== null; source: Qt.resolvedUrl("Panel.qml") }` plus `onLoaded: injectPanel()`
 handing the dependencies over *after* construction. **Measured, not
-hypothesised: this was already safe.** Two shell restarts plus a live panel
-open with that exact Loader produced zero `TypeError`s in either the journal
-or the shell's own per-instance `log.qslog` (see `exchange/11-s6-fixes.md`,
-confirmed independently in `exchange/12-fable-review.md`) — `active:` gating
-construction until `svc` resolves was already enough to keep Panel's
-bindings from ever seeing a null `service`.
+hypothesised: this was already safe** for the CONSTRUCTION path. Two shell
+restarts plus a live panel open with that exact Loader produced zero
+`TypeError`s in either the journal or the shell's own per-instance
+`log.qslog` (see `exchange/11-s6-fixes.md`, confirmed independently in
+`exchange/12-fable-review.md`) — `active:` gating construction until `svc`
+resolves was already enough to keep Panel's bindings from ever seeing a
+null `service` **the first time it loads**.
 
-As of this pass (C3, `exchange/12-fable-review.md`), the mechanism is
-hardened anyway, at near-zero cost: `BarWidget.qml`'s `_loadPanel()` calls
+C3 (`exchange/12-fable-review.md`) hardened the construction path further,
+at near-zero cost: `BarWidget.qml`'s `_loadPanel()` calls
 `panelLoader.setSource(Qt.resolvedUrl("Panel.qml"), { bar, settings,
-anchorItem, hostWidget, service })` exactly once, the first time `svc`
-resolves non-null (checked via `panelLoader.status === Loader.Null`, so it
-is harmless to call from both `Component.onCompleted` — svc already resolved
-— and `onSvcChanged` — svc arriving later — whichever fires first).
-Quickshell applies the second argument as the loaded component's *initial*
-property values, evaluated before the component's own bindings run, so
-`service` (and `bar`/`settings`/`anchorItem`/`hostWidget`) are never `null`
-for even the first frame, by construction rather than by ordering luck. The
-`active: svc !== null` gate is no longer needed and has been removed; the
-`Loader` now carries no `source`/`active` binding at all, only `visible:
-false` and the existing `onLoaded` re-injection (kept so later `bar`/
-`settings`/`svc` changes still propagate through `injectPanel()`, exactly as
-before).
+anchorItem, hostWidget, service })` whenever the Loader is active and not
+yet loaded (checked via `panelLoader.status === Loader.Null`, so it is
+harmless to call from both `Component.onCompleted` — svc already resolved —
+and `onSvcChanged` — svc arriving later — whichever fires first). Quickshell
+applies the second argument as the loaded component's *initial* property
+values, evaluated before the component's own bindings run, so `service`
+(and `bar`/`settings`/`anchorItem`/`hostWidget`) are never `null` for even
+the first frame, by construction rather than by ordering luck.
+
+At the time, C3 also removed the `active: svc !== null` gate as apparently
+redundant, reasoning that `setSource`'s initial-properties mechanism alone
+was sufficient. **That was a mistake, corrected by N4
+(`exchange/25-fable-review-s10.md`): the gate is needed for the DESTROY
+path, which C3's own measurement never covered.**
+`/usr/share/omarchy/shell/shell.qml`'s `_syncServices()` destroys and
+recreates a plugin's service instance if the plugin registry transiently
+reports it disabled at startup — a real, observed race (not hypothetical:
+`exchange/24-s10-native-process.md` deviation 5 measured 35-88 matching
+`TypeError` lines on `omarchy restart shell`, initially misdiagnosed as
+unrelated/pre-existing). Without the gate, `svc` transitions non-null ->
+null -> (a NEW instance) non-null on the *same* `BarWidget` instance;
+`onSvcChanged` still fires `injectPanel()` while `svc` is null, which wrote
+`service = null` straight into the ALREADY-LIVE Panel from the
+now-destroyed service — every one of Panel's ~150 unguarded `service.`
+reads then throws. The gate is back: `Loader { active: root.svc !== null }`
+now destroys the stale Panel (and resets `status` to `Loader.Null`) the
+moment `svc` goes null, so when a new `svc` arrives, `_loadPanel()`'s
+`status === Loader.Null` check re-fires `setSource` with the new instance —
+a fresh, properly-initialized Panel every cycle, never a live one mutated
+to null and back. `injectPanel()` also now returns early whenever
+`root.svc` is null, as a second, redundant guard for the same event.
 
 `BarWidget.qml` itself remains the one file that DOES need every `svc` read
 null-guarded (`svc ? svc.x : <default>`), because the bar widget itself
@@ -118,20 +137,28 @@ Four `Process` objects, one contract each (`Service.qml`):
 | Process | Command | Deadline | Caps | stdin |
 |---|---|---|---|---|
 | `readProcess` (queue) | `Model.argv(...)` read verbs, direct | `readTimeoutMs` (default 10 s), one watchdog per queued read | per-line slice + total lines (4096) / chars (262144); breach stops appending, signals the child, marks the read `overflowed` (treated as a failure) | none |
-| `actionProcess` (queue) | `Model.argv(...)` mutating verbs, direct | `actionTimeoutMs` (default 20 s) | same caps | `account login` only: `onStarted` → `write(number + "\n")`, clear the secret, then `stdinEnabled = false` (EOF). Every other action closes stdin the same way even though it never writes — nothing here reads further stdin once started. |
+| `actionProcess` (queue) | `Model.argv(...)` mutating verbs, direct | `actionTimeoutMs` (default 20 s) | same caps | `account login` only: `onStarted` → `write(number + "\n")`, clear the secret, then `stdinEnabled = false` (EOF). Every other action closes stdin the same way even though it never writes — nothing here reads further stdin once started. `stdinEnabled` is reset back to `true` at ARM time (N1, `exchange/25-fable-review-s10.md`) so a later action's `write()` isn't silently lost to a stdin a PREVIOUS action's `onStarted` already closed. |
 | `listenerProcess` | `["mullvad","status","--json","listen"]`, unchanged since S6 | none (long-lived) | per-line slice only (`listenerLineChars`) | none |
-| `updateCheckProcess` | `[updateCheckScript]` — `scripts/mullvad-update-check` stays a bash script (it wraps `checkupdates`, not the Mullvad CLI) spawned as a direct `Process`, same as before S10 | `updateCheckTimeoutMs` (130 s) | same caps | none |
+| `updateCheckProcess` | `[updateCheckScript]` — `scripts/mullvad-update-check` stays a bash script (it wraps `checkupdates`, not the Mullvad CLI) spawned as a direct `Process`, same as before S10 | `updateCheckTimeoutMs` (default 130 s; probe-shortenable like the other two as of N6) | same caps | none |
 
 **Watchdog pattern**, one `Timer` per process (`readWatchdog`/`actionWatchdog`/
 `updateCheckWatchdog`), modeled on `halmylyseas.github-status`'s
 `probeWatchdog`/`probeWatchdogFired`: on arm, `watchdog.interval = ms;
 watchdog.restart()` (interval assigned imperatively at arm time, never a
 live binding — Timer gotcha, recurs in every Omarchy plugin that's shipped
-one). On the process's own `exited`, `watchdog.stop()`. On the watchdog
-firing: set a one-shot `_<kind>WatchdogFired` flag (consumed and reset by
-the next `onExited`) and a persistent `_<kind>WatchdogFiredCount` (a debug
-counter `test/probe/service-probe.qml` reads), send `signal(15)`, then arm
-a 1s `killTimer` that sends `signal(9)` if the child is still alive.
+one). On the process's own `exited`, `watchdog.stop()` **and its matching
+`killTimer.stop()`** (N2, `exchange/25-fable-review-s10.md`: the kill timer
+was not previously stopped here, so a process that exited promptly on its
+own `signal(15)` let the queue start the NEXT process while the still-
+ticking 1s kill timer was pending — when it fired, `if (proc.running)` was
+true again for the wrong (newer) child, which then got SIGKILLed). On the
+watchdog firing: set a one-shot `_<kind>WatchdogFired` flag (consumed and
+reset by the next `onExited`) and a persistent `_<kind>WatchdogFiredCount`
+(a debug counter `test/probe/service-probe.qml` reads), send `signal(15)`,
+then arm a 1s `killTimer` that sends `signal(9)` if the child is still
+alive **and its `processId` still matches the PID captured at that
+process's own `onStarted`** (N2's second guard, `root._<kind>ArmedPid`) —
+belt-and-suspenders against the same stale-timer scenario.
 `running = false` alone would **not** escalate anything here — it only
 sends SIGTERM again (measured, see below) — so the killTimer calls
 `signal(9)` explicitly. Same-tick guards read `Process.running` directly,
@@ -191,12 +218,17 @@ byte. Before S10 this was flagged as a listener-only accepted risk (see
 "Why the listener runs unwrapped" below); it now applies to
 `readProcess`/`actionProcess`/`updateCheckProcess` too, since none of them
 route through a byte-capping shell pipe (`head -c`) anymore either.
-Verified live in `test/probe/run`'s flood mode: the mock writes 10 MiB with
-no newline then one trailing newline, `SplitParser` buffers the whole
-thing internally and delivers it as one (huge) `onRead` call, at which
-point `_appendBoundedOutput` correctly caps the *stored* text at
-`finiteOutputChars` and kills the process — but Quickshell's own internal
-buffer held the full 10 MiB transiently first. Accepted for the same
+Verified live in `test/probe/run`'s flood mode: the mock loops forever,
+writing 64 KiB chunks with no newline ever (N6, `exchange/25-fable-review-
+s10.md` — a genuine streaming flood with no natural exit, replacing an
+earlier one-shot 10 MiB dump that already exited cleanly on its own and so
+never actually proved the kill signal did anything). `SplitParser` buffers
+everything internally with no `onRead` call until the process finally
+dies (from Service.qml's own watchdog/kill escalation, the only thing that
+can end it) and delivers the trailing partial line as one (huge) `onRead`
+call, at which point `_appendBoundedOutput` correctly caps the *stored*
+text at `finiteOutputChars` — but Quickshell's own internal buffer held
+however many megabytes accumulated transiently first. Accepted for the same
 reason as before: the source is the local, root-installed `mullvad` CLI,
 not untrusted/remote input, and every real line it emits (JSON status
 objects, human-readable settings) is a few hundred bytes at most.
