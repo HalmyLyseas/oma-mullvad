@@ -181,6 +181,70 @@ here), the matching process is sent `signal(15)` immediately — it does not
 keep running just because the QML side stopped reading its output — and
 an overflow counter increments for the probe suite.
 
+**Failed-start semantics (S12, `exchange/28-s12-failed-start-spec.md`)**:
+measured live (`scratchpad/s12/`) — a `Process` whose binary cannot be
+found logs Quickshell's own "Process failed to start" warning and flips
+`running` to `false` **without ever emitting `exited`**. A normal exit's
+`running:true→false` transition, by contrast, is always immediately
+followed by `exited` (confirmed for a genuinely fast/successful child too,
+`scratchpad/s12/probe3.qml`). Before this fix, every read/action/
+updateCheck was only ever finalized from inside `onExited` — a binary
+disappearing mid-session (e.g. `pacman -R mullvad-vpn`) therefore left: a
+`readProcess` read's result never applied (stale `_readKind`, watchdog left
+armed, harmless-but-dirty), an `actionProcess` action's `actionStatus`
+stuck at `"<label>…"` forever with no `refreshAll()` (so `installed`/
+`daemonRunning` never got re-checked either), and the live listener kept
+streaming from a daemon whose CLI no longer resolves.
+
+Fixed by giving each of the three finite processes an `onRunningChanged`
+that, on `!running`, schedules a `Qt.callLater` check one event-loop turn
+out — deferred so a normal exit's own `exited` (which always fires first,
+synchronously, before any queued `callLater`) has already run. Each
+process's `onExited` body is factored into a shared `_readFinalize`/
+`_actionFinalize`/`_updateCheckFinalize(exitCode, exitStatus, ...)` so the
+synthetic path (`exitCode` 127, error text `"failed to start (binary
+missing?)"`) and the real `exited` path apply the exact same result
+handling, watchdog/kill-timer teardown, and queue continuation.
+
+Guarded with a **per-kind generation counter**
+(`_readGen`/`_actionGen`/`_updateCheckGen`, bumped on every arm, plus a
+matching `_<kind>ExitedGen` stamped by the real `onExited`), not a plain
+boolean flag — a boolean was tried first and measured live to corrupt the
+read queue: `_readFinalize`'s own `Qt.callLater(root._startNextRead)`
+(queued from the real `onExited`, which fires first) can start arming the
+*next* read in the very same `callLater` batch that also contains the
+*current* read's now-stale `onRunningChanged` check (queued second, from
+the same synchronous turn). Back-to-back fast/successful reads — the mock
+probe suite's `cat`-a-fixture reads all complete inside a single tick —
+let `_startNextRead()` reset a plain boolean back to `false` for the *next*
+read before the *first* read's own stale callback finally ran; that stale
+callback then misread the next read's fresh "armed, not yet exited" state
+as its own read's missing exit, synthesizing a bogus failure against the
+wrong (still legitimately running) process and clobbering `_readKind`.
+Measured concretely while building this fix's probe suite: this exact race
+made the "ok" scenario's `relay list` read fire 3× and `locationsLength`
+come back `0`, caught by `test/all` before the fix was corrected to use
+generations. The generation check (`root._<kind>Gen === capturedGen &&
+root._<kind>ExitedGen !== capturedGen`) makes a stale callback a safe no-op
+however late it actually runs, since a newer arm can only exist if the
+previous one is already fully resolved one way or the other.
+
+Also: `_applyRead`'s `"probe"` kind, on `!installed`, now resets
+`daemonVersion`/`daemonSupported`/`suggestedUpgrade` in addition to
+`cliVersion` — previously only `cliVersion` was cleared, so the System tab
+kept showing a stale daemon version/support string after the CLI vanished.
+
+Test coverage: `test/probe/run`'s `removed` scenario (`test/probe/
+service-probe.qml`) deletes a per-run temp symlink standing in for the
+`mullvad` binary mid-run and drives both the read-side recovery
+(`daemonRunning`→false, then `installed`→false via the existing
+`/usr/bin/env`-wrapped probe read) and the action-side one
+(`connectTunnel()` while `installed` is still stale-true, asserting
+`actionStatus` reads as a failure rather than staying stuck at
+`"Connecting…"`, and `busy` settles to `false`) — see that file's own
+comments for why the PATH for this scenario is built differently from
+every other one.
+
 ### Measured facts (Quickshell 0.3.1; PM probe, `scratchpad/pm-native/probe/shell.qml`)
 
 - `Process.running = false` sends **SIGTERM** to the direct child (a
