@@ -82,9 +82,15 @@ out_pid=$!
 exec 4> >(finite_cap >&2)
 err_pid=$!
 
-"${command[@]}" >&3 2>&4 &
+# Bash gives a backgrounded (&) command /dev/null as stdin when job control
+# is off (every non-interactive script), which silently emptied the account
+# number that `mullvad account login` reads from stdin (upstream bug since
+# the wrapper was introduced). Keep our real stdin on fd 5 and hand it over
+# explicitly.
+exec 5<&0
+"${command[@]}" <&5 >&3 2>&4 &
 child_pid=$!
-exec 3>&- 4>&-
+exec 3>&- 4>&- 5<&-
 
 wait "$child_pid"
 status=$?

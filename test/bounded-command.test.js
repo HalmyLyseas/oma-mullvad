@@ -6,9 +6,17 @@ const assert = require("node:assert/strict");
 
 const guard = join(__dirname, "..", "scripts", "bounded-command");
 
-function run(args) {
-    return spawnSync(guard, args, { encoding: "utf8", timeout: 4000 });
+function run(args, input) {
+    return spawnSync(guard, args, { encoding: "utf8", timeout: 4000, input: input });
 }
+
+test("stdin reaches the wrapped command (account login writes the number over stdin)", () => {
+    // Regression: bash gives a backgrounded command /dev/null as stdin when
+    // job control is off, which emptied `mullvad account login`'s input.
+    const result = run(["finite", "2", "10", "100", "--", "/usr/bin/cat"], "1234 5678 9012 3456\n");
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout, "1234 5678 9012 3456\n");
+});
 
 test("command guard enforces deadlines and output limits", () => {
     let result = run(["finite", "2", "3", "100", "--", "/usr/bin/printf", "a\nb\nc\nd\n"]);

@@ -668,7 +668,8 @@ Panel {
       // "<Label> complete", ...) but never rendered anywhere -- dead UX.
       Text {
         textFormat: Text.PlainText
-        visible: service.actionStatus !== ""
+        // Hidden when it would only repeat the lastError line just below.
+        visible: service.actionStatus !== "" && service.actionStatus !== service.lastError
         width: parent.width
         elide: Text.ElideRight
         text: service.actionStatus
