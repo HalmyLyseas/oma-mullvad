@@ -6,13 +6,24 @@
 // reactive, because shell._services is reassigned (never mutated) on every
 // service add (see /usr/share/omarchy/shell/shell.qml ensureService()).
 //
-// Panel.qml is hosted from here via a Loader gated on `svc !== null`
-// (deliberate, not a lazy-load optimisation): Panel.qml keeps its ~150
-// unguarded `service.` bindings because it is only ever instantiated once
-// the singleton service actually exists, so it never needs a null-service
-// stub state of its own. Every `svc` read in THIS file, by contrast, must be
-// guarded -- the bar paints this widget before the service resolves on
-// first load.
+// Panel.qml is hosted from here via a Loader that is never given a `source`
+// binding directly. Instead, _loadPanel() calls
+// panelLoader.setSource(Qt.resolvedUrl("Panel.qml"), { bar, settings,
+// anchorItem, hostWidget, service }) exactly once, the first time `svc`
+// resolves non-null (C3, 12-fable-review.md -- hardening, not a fix for an
+// observed bug: two restarts + a panel open with the OLD source-binding +
+// onLoaded-injection Loader produced zero TypeErrors in the journal or the
+// shell's own qslog, see 11-s6-fixes.md/12-fable-review.md). Quickshell's
+// `Loader.setSource(url, initialProperties)` applies those properties as
+// the component's initial property values, evaluated before the component's
+// own bindings run -- so Panel.qml's ~150 unguarded `service.`/`bar.`/etc.
+// reads never evaluate against `null` for even a single frame, regardless of
+// construction order (svc already set at Component.onCompleted, or svc
+// arriving later via onSvcChanged). The old `active: svc !== null` gate is
+// therefore no longer needed and has been removed; `_loadPanel()`'s own
+// `panelLoader.status === Loader.Null` check is what makes setSource
+// idempotent. Every `svc` read in THIS file must still be guarded -- the
+// bar paints this widget before the service resolves on first load.
 import QtQuick
 import qs.Commons
 import qs.Ui
@@ -67,6 +78,20 @@ BarWidget {
     if ("service" in target) target.service = root.svc
   }
 
+  // C3: creates Panel.qml exactly once, the first time svc resolves
+  // non-null, passing every dependency as an INITIAL property via
+  // setSource(url, props) rather than a `source:` binding + post-hoc
+  // injection -- see the file-header comment. The `status === Loader.Null`
+  // check makes this idempotent: harmless to call again from either
+  // Component.onCompleted or onSvcChanged, whichever fires first.
+  function _loadPanel() {
+    if (panelLoader.status !== Loader.Null || !root.svc) return
+    panelLoader.setSource(Qt.resolvedUrl("Panel.qml"), {
+      bar: root.bar, settings: root.settings, anchorItem: button,
+      hostWidget: root, service: root.svc
+    })
+  }
+
   // Pushes the widget's own refreshIntervalSec setting down onto the
   // singleton service -- the service does not read bar-widget `settings`
   // itself (it is shared machine-wide and has no single owning widget), so
@@ -87,16 +112,15 @@ BarWidget {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
+  Component.onCompleted: _loadPanel()
   onBarChanged: injectPanel()
   onSettingsChanged: { injectPanel(); _pushPollInterval() }
-  onSvcChanged: { injectPanel(); _pushPollInterval() }
+  onSvcChanged: { _loadPanel(); injectPanel(); _pushPollInterval() }
 
   Loader {
     id: panelLoader
-    // Deliberate gate -- see file header. Panel.qml is only ever created
-    // once the singleton service actually resolves.
-    active: root.svc !== null
-    source: Qt.resolvedUrl("Panel.qml")
+    // No `source`/`active` binding -- see file header. Created once, via
+    // root._loadPanel()'s setSource(url, initialProps) call.
     visible: false
     onLoaded: {
       root.injectPanel()

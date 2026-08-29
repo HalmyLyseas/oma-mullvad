@@ -45,20 +45,44 @@ is ever renamed on one side only):
 `settings` directly (a machine-wide singleton has no single owning widget to
 read settings from — see "settings vs. the service" below).
 
-### Why the Panel `Loader` is gated on `svc !== null`
+### How the Panel `Loader` avoids a null-service Panel (C3)
 
-`BarWidget.qml`'s `Loader { active: root.svc !== null; source:
-Qt.resolvedUrl("Panel.qml") }` is deliberate, not a lazy-load optimisation.
 `Panel.qml` reads `service.<property>` unguarded in roughly 150 places (every
-page: Overview, Locations, Advanced, Excluded Apps). Gating the Loader means
-Quickshell never even constructs a `Panel.qml` instance until the singleton
-service already exists, so Panel never needs a "service is still null" stub
-state or 150 individual null-guards — it can assume `service` is always a
-live object for as long as it exists at all. `BarWidget.qml` itself is the
-one file that DOES need every `svc` read null-guarded (`svc ? svc.x :
-<default>`), because the bar widget itself paints before the service
-resolves on first load — that guarding work is concentrated in one small
-file instead of spread across the whole panel.
+page: Overview, Locations, Advanced, Excluded Apps) — it is written to assume
+`service` is always a live object for as long as it exists at all, never a
+"service is still null" stub state.
+
+Through the S6 fix pass this was enforced with `Loader { active: root.svc
+!== null; source: Qt.resolvedUrl("Panel.qml") }` plus `onLoaded: injectPanel()`
+handing the dependencies over *after* construction. **Measured, not
+hypothesised: this was already safe.** Two shell restarts plus a live panel
+open with that exact Loader produced zero `TypeError`s in either the journal
+or the shell's own per-instance `log.qslog` (see `exchange/11-s6-fixes.md`,
+confirmed independently in `exchange/12-fable-review.md`) — `active:` gating
+construction until `svc` resolves was already enough to keep Panel's
+bindings from ever seeing a null `service`.
+
+As of this pass (C3, `exchange/12-fable-review.md`), the mechanism is
+hardened anyway, at near-zero cost: `BarWidget.qml`'s `_loadPanel()` calls
+`panelLoader.setSource(Qt.resolvedUrl("Panel.qml"), { bar, settings,
+anchorItem, hostWidget, service })` exactly once, the first time `svc`
+resolves non-null (checked via `panelLoader.status === Loader.Null`, so it
+is harmless to call from both `Component.onCompleted` — svc already resolved
+— and `onSvcChanged` — svc arriving later — whichever fires first).
+Quickshell applies the second argument as the loaded component's *initial*
+property values, evaluated before the component's own bindings run, so
+`service` (and `bar`/`settings`/`anchorItem`/`hostWidget`) are never `null`
+for even the first frame, by construction rather than by ordering luck. The
+`active: svc !== null` gate is no longer needed and has been removed; the
+`Loader` now carries no `source`/`active` binding at all, only `visible:
+false` and the existing `onLoaded` re-injection (kept so later `bar`/
+`settings`/`svc` changes still propagate through `injectPanel()`, exactly as
+before).
+
+`BarWidget.qml` itself remains the one file that DOES need every `svc` read
+null-guarded (`svc ? svc.x : <default>`), because the bar widget itself
+paints before the service resolves on first load — that guarding work stays
+concentrated in one small file instead of spread across the whole panel.
 
 Panel keeps its own `stateIcon`/`stateColor` (used in the Overview hero
 icon), but instead of duplicating BarWidget's svc-guarded computation, it
