@@ -350,11 +350,21 @@ echo "== removed mode (S12: mullvad binary vanishes mid-run) =="
 REMOVED_PATH_DIR="$OUT_DIR/removed-path"
 mkdir -p "$REMOVED_PATH_DIR"
 ln -sf "$PLUGIN_DIR/test/mocks/mullvad" "$REMOVED_PATH_DIR/mullvad"
-SAFE_FALLBACK_PATH="$PATH"
-if real_mullvad="$(command -v mullvad 2>/dev/null)"; then
-  real_mullvad_dir="$(dirname "$real_mullvad")"
-  SAFE_FALLBACK_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -x "$real_mullvad_dir" | paste -sd: -)"
-fi
+# The scenario's PATH is ONLY this directory: the mock `mullvad` symlink,
+# the `checkupdates` mock, and symlinks to the handful of system tools the
+# Service/scripts/mocks need. Nothing else -- so deleting the symlink makes
+# `mullvad` genuinely unresolvable (exit 127 / failed start) even on a
+# machine where a REAL /usr/bin/mullvad exists (the earlier "strip the real
+# mullvad's directory from the fallback PATH" approach removed /usr/bin
+# wholesale on such a machine and took `timeout`/`qs` with it -- measured
+# 2026-08-29 right after Mullvad was reinstalled). qs/timeout for the
+# launch itself are resolved to absolute paths beforehand.
+for tool in bash sh env sleep cat head awk tr mktemp rm grep sed printf pgrep timeout readlink dirname wc sort paste date kill; do
+  real="$(command -v "$tool" 2>/dev/null)" && ln -sf "$real" "$REMOVED_PATH_DIR/$tool"
+done
+ln -sf "$PLUGIN_DIR/test/mocks/checkupdates" "$REMOVED_PATH_DIR/checkupdates"
+QS_BIN="$(command -v qs)"
+TIMEOUT_BIN="$(command -v timeout)"
 
 log="$OUT_DIR/removed.log"
 mocklog="$OUT_DIR/removed.mock.log"
@@ -366,8 +376,8 @@ env MULLVAD_MOCK_LOG="$mocklog" \
   MULLVAD_MOCK_LINK="$REMOVED_PATH_DIR/mullvad" \
   MULLVAD_MOCK_MODE=ok \
   MULLVAD_PROBE_REMOVED=1 \
-  PATH="$REMOVED_PATH_DIR:$SAFE_FALLBACK_PATH" \
-  timeout 30 qs -n -p "$PLUGIN_DIR/test/probe/service-probe.qml" > "$log" 2>&1
+  PATH="$REMOVED_PATH_DIR" \
+  "$TIMEOUT_BIN" 30 "$QS_BIN" -n -p "$PLUGIN_DIR/test/probe/service-probe.qml" > "$log" 2>&1
 end_ts=$(date +%s)
 elapsed=$((end_ts - start_ts))
 json="$(json_line "$log")"
