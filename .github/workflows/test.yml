@@ -15,7 +15,7 @@ jobs:
       # run (steps execute in the order listed, checkout does not have to
       # be first).
       - name: Install git
-        run: pacman -Sy --noconfirm git
+        run: pacman -Syu --noconfirm git
 
       - uses: actions/checkout@v7
 
