@@ -76,6 +76,13 @@ if [[ "$MODE" == "noversion" && "$*" == "--version" ]]; then
   exit 1
 fi
 
+# untestedversion: --version reports a CLI release ahead of the pinned
+# SUPPORTED_CLI_VERSIONS list; every other invocation behaves like "ok".
+if [[ "$MODE" == "untestedversion" && "$*" == "--version" ]]; then
+  echo "mullvad-cli 2027.1"
+  exit 0
+fi
+
 # --- account login: reads exactly one stdin line ----------------------------
 if [[ "${1:-}" == "account" && "${2:-}" == "login" ]]; then
   if [[ "$MODE" == "fail" ]]; then

@@ -114,8 +114,27 @@ else
   groupCount="$(field "$json" excludedGroupCount)"
   [[ "${groupCount:-0}" -eq 1 ]] && ok "ok: excludedGroupCount === 1 ($groupCount)" \
     || not_ok "ok: excludedGroupCount === 1 (got $groupCount)"
+  [[ "$(field "$json" cliVersionSupported)" == "true" ]] && ok "ok: cliVersionSupported=true (pinned 2026.4)" \
+    || not_ok "ok: cliVersionSupported=true (got: $(field "$json" cliVersionSupported))"
 fi
 check_no_orphans "$mocklog" "ok"
+
+echo
+echo "== untestedversion mode (S17: CLI ahead of the pinned SUPPORTED_CLI_VERSIONS list) =="
+log="$(run_scenario untestedversion MULLVAD_MOCK_MODE=untestedversion)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/untestedversion.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "untestedversion: probe printed a PROBE_RESULT line"
+  cat "$log"
+else
+  ok "untestedversion: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" cliVersion)" == "2027.1" ]] && ok "untestedversion: cliVersion=2027.1" \
+    || not_ok "untestedversion: cliVersion=2027.1 (got: $(field "$json" cliVersion))"
+  [[ "$(field "$json" cliVersionSupported)" == "false" ]] && ok "untestedversion: cliVersionSupported=false" \
+    || not_ok "untestedversion: cliVersionSupported=false (got: $(field "$json" cliVersionSupported))"
+fi
+check_no_orphans "$mocklog" "untestedversion"
 
 echo
 echo "== fail mode =="

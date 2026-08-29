@@ -159,6 +159,20 @@ ShellRoot {
     return null
   }
 
+  // Depth-first search for a Text whose `text` contains the given
+  // substring -- how the version-warning notice is identified, since
+  // plain Text items have no `label` property of their own.
+  function findTextContaining(item, substring) {
+    if (!item) return null
+    if (typeof item.text === "string" && item.text.indexOf(substring) !== -1) return item
+    var kids = item.children || []
+    for (var i = 0; i < kids.length; i++) {
+      var found = findTextContaining(kids[i], substring)
+      if (found) return found
+    }
+    return null
+  }
+
   // Order-independent, index-based equality: excludedGroups() is
   // unmemoized, so a fresh read and the Repeater's cached model are
   // never the same array/Array.isArray()-passing instance.
@@ -194,6 +208,7 @@ ShellRoot {
     else if (scenario === "dropdown") scenarioDropdown()
     else if (scenario === "excluded") scenarioExcluded()
     else if (scenario === "lifecycle") scenarioLifecycle()
+    else if (scenario === "versionwarning") scenarioVersionWarning()
     else finish("unknown MULLVAD_UI_SCENARIO: " + scenario)
   }
 
@@ -212,11 +227,40 @@ ShellRoot {
   // (2) ready: CLI + daemon usable, all pages unlocked.
   function scenarioReady() {
     var p = panel()
+    var notice = p ? findTextContaining(p._debugPageItem, "is untested with this plugin") : null
     finish("", {
       installed: svc.installed,
       daemonRunning: svc.daemonRunning,
       cliReady: p ? p.cliReady : null,
-      pageAvailable: p ? [0, 1, 2, 3, 4].map(function(i) { return p.pageAvailable(i) }) : null
+      pageAvailable: p ? [0, 1, 2, 3, 4].map(function(i) { return p.pageAvailable(i) }) : null,
+      cliVersionSupported: svc.cliVersionSupported,
+      versionNoticeVisible: notice ? notice.visible : false
+    })
+  }
+
+  // (6) version warning: an untested CLI version shows the Overview notice
+  // and the System tab's "(untested)" suffix next to the CLI line.
+  function scenarioVersionWarning() {
+    var p = panel()
+    if (!p) { finish("no panel instance"); return }
+    var notice = findTextContaining(p._debugPageItem, "is untested with this plugin")
+    // Read eagerly: p.showPage(4) below destroys the Overview page delegate
+    // (and `notice` with it), the same destroy-before-read trap as scenario 5.
+    var overviewNoticeVisible = notice ? notice.visible : false
+    var overviewNoticeText = notice ? notice.text : ""
+    var prevPage = p._debugPageItem
+    p.showPage(4) // System
+    _waitUntil(function() { return p._debugPageItem !== null && p._debugPageItem !== prevPage }, 3000, function(timedOut) {
+      if (timedOut) { finish("System page did not load within 3s"); return }
+      var cliLine = findTextContaining(p._debugPageItem, "CLI: ")
+      finish("", {
+        cliVersion: svc.cliVersion,
+        cliVersionSupported: svc.cliVersionSupported,
+        overviewNoticeVisible: overviewNoticeVisible,
+        overviewNoticeText: overviewNoticeText,
+        systemCliLineText: cliLine ? cliLine.text : "",
+        systemCliLineMentionsUntested: cliLine ? cliLine.text.indexOf("(untested)") !== -1 : false
+      })
     })
   }
 

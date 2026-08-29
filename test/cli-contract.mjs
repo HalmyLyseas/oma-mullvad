@@ -2,6 +2,18 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+// Same strip-and-eval as test/model.test.js: Model.js is .pragma library
+// QML, so Node can't require() it directly.
+const modelSource = readFileSync(join(__dirname, "..", "Model.js"), "utf8")
+  .replace(/^\.pragma library\s*/, "");
+const modelExports = { exports: {} };
+new Function("module", "exports", modelSource)(modelExports, modelExports.exports);
+const Model = modelExports.exports;
 
 const ACCOUNT = /\b\d{16}\b/g;
 
@@ -35,7 +47,12 @@ const version = readOnly(["--version"]);
 if (version.error?.code === "ENOENT") skip("mullvad CLI is not installed");
 assert.equal(version.status, 0, "mullvad --version failed");
 ensureNoAccount(version.stdout, "version");
-assert.match(version.stdout.trim(), /^mullvad-cli 2026\.4(?:\.\d+)?$/, "Mullvad plugin targets Mullvad CLI 2026.4");
+const cliVersion = Model.parseCliVersion(version.stdout);
+assert.ok(
+  Model.isCliVersionSupported(cliVersion),
+  `installed mullvad-cli ${cliVersion || "(unparsed)"} is not in the pinned SUPPORTED_CLI_VERSIONS list ` +
+  `[${Model.SUPPORTED_CLI_VERSIONS.join(", ")}] -- a Mullvad upgrade needs Model.SUPPORTED_CLI_VERSIONS updated`
+);
 
 const status = readOnly(["status", "--json"]);
 if (status.status !== 0) skip("Mullvad daemon is unavailable");

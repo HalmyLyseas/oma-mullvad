@@ -289,6 +289,8 @@ ShellRoot {
       installed: service.installed,
       daemonRunning: service.daemonRunning,
       state: service.state,
+      cliVersion: service.cliVersion,
+      cliVersionSupported: service.cliVersionSupported,
       locationsLength: (service.locations || []).length,
       lastError: service.lastError,
       actionStatus: service.actionStatus,

@@ -515,6 +515,13 @@ Panel {
     function connect(): string { service.connectTunnel(); return "ok" }
     function disconnect(): string { service.disconnectTunnel(); return "ok" }
     function toggleTunnel(): string { service.toggleTunnel(); return "ok" }
+    // "on"/"off" only -- anything else is a no-op so a typo never silently
+    // flips the opposite setting.
+    function lockdown(mode: string): string {
+      if (mode === "on") service.setLockdown(true)
+      else if (mode === "off") service.setLockdown(false)
+      return "ok"
+    }
     // JSON array of the grouped excluded processes shown on the Excluded tab.
     function excluded(): string { return JSON.stringify(root.excludedGroups()) }
     function nextFavorite(): string { return root.cycleFavorite(1) }
@@ -527,6 +534,8 @@ Panel {
     function systemInfo(): string {
       return JSON.stringify({
         cliVersion: service.cliVersion,
+        cliVersionSupported: service.cliVersionSupported,
+        lockdown: service.lockdown,
         daemonVersion: service.daemonVersion,
         daemonSupported: service.daemonSupported,
         suggestedUpgrade: service.suggestedUpgrade,
@@ -730,6 +739,19 @@ Panel {
             }
           }
         }
+      }
+
+      Text {
+        textFormat: Text.PlainText
+        visible: service.cliVersionSupported === false
+        width: parent.width
+        elide: Text.ElideRight
+        text: "Mullvad " + Model.plainText(service.cliVersion, 32)
+          + " is untested with this plugin; some settings may display incorrectly."
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
       }
 
       // Renders service.actionStatus ("Connecting…", "<Label> failed", ...)
@@ -1704,6 +1726,7 @@ Panel {
         textFormat: Text.PlainText
         width: parent.width
         text: "CLI: " + (service.cliVersion !== "" ? Model.plainText(service.cliVersion, 64) : "unknown")
+          + (service.cliVersionSupported === false ? " (untested)" : "")
         color: root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.body

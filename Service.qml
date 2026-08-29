@@ -80,6 +80,8 @@ Item {
 
   // System tab: binaries/daemon/updates state.
   property string cliVersion: ""
+  // null while cliVersion is unknown (not yet probed, or CLI absent).
+  readonly property var cliVersionSupported: cliVersion === "" ? null : Model.isCliVersionSupported(cliVersion)
   property string daemonVersion: ""
   property var daemonSupported: null // bool|null
   property string suggestedUpgrade: ""
