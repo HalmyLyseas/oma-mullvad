@@ -499,6 +499,17 @@ Item {
   // entirely, exactly like before this rework -- only how the process is
   // armed changed). `secret`, when non-empty, is written to actionProcess's
   // stdin and cleared on `onStarted` (see the Process below), never here.
+  //
+  // N1 (25-fable-review-s10.md): `onStarted` below always closes stdin
+  // (`stdinEnabled = false`) once a process starts, but nothing was ever
+  // setting it back to `true` -- every action after the very first one in
+  // the object's lifetime armed a process whose `stdinEnabled` was still
+  // `false` from the PREVIOUS action, so a `write()` in a later `onStarted`
+  // (e.g. a `login()` that follows a `connect()`) silently went nowhere.
+  // This is the `22-login-stdin-bug.md` regression again, at the QML level
+  // this time instead of bash's. Reset it here, before `running = true`,
+  // exactly like every other per-arm reset in this function (label,
+  // secret, command).
   function _armAction(command, label, secret) {
     // C4 (12-fable-review.md): stop the "clear actionStatus" timer before
     // arming the next action's label -- otherwise a timer started by the
@@ -513,6 +524,7 @@ Item {
     actionProcess.secret = secret || ""
     actionProcess.command = command
     actionStatus = label + "…"
+    actionProcess.stdinEnabled = true
     actionProcess.running = true
   }
 
