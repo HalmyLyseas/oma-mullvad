@@ -15,8 +15,12 @@
 # "checked, nothing to report".
 #
 # MULLVAD_UPDATE_CHECK_TIMEOUT overrides the internal timeout (default 120s)
-# for tests; the caller (Service.qml) additionally wraps this whole script
-# in its own longer bounded-command deadline as a backstop.
+# for tests; the caller (Service.qml) additionally arms its own longer
+# (130s) QML watchdog around this whole script as a backstop (S10,
+# 23-s10-native-process-spec.md -- no scripts/bounded-command wrapper
+# anymore; this script is still spawned as a direct Process, unwrapped,
+# same as it was before that rework since it wraps checkupdates, not the
+# Mullvad CLI).
 set -uo pipefail
 
 timeout_seconds="${MULLVAD_UPDATE_CHECK_TIMEOUT:-120}"

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # test/all -- runs every test suite in this repo: Node unit tests (Model.js,
-# bounded-command guard, QML Text-sink audit), the scripts.test.sh suite
-# (mullvad-package-info / mullvad-update-check against fixtures/mocks), then
-# the read-only Mullvad CLI contract check. Exits non-zero if any suite fails.
+# the QML Text-sink audit), the scripts.test.sh suite (mullvad-package-info /
+# mullvad-update-check / install-mullvad against fixtures/mocks), the
+# read-only Mullvad CLI contract check, then test/probe/run's deterministic
+# mock-CLI probe suite for Service.qml's Process rework (S10,
+# 23-s10-native-process-spec.md). Exits non-zero if any suite fails.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
