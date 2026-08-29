@@ -313,12 +313,29 @@ Panel {
     return result
   }
 
+  // Locations / Advanced / Excluded need the Mullvad CLI: while it is
+  // absent they are greyed out and unreachable (tab click, 2/3/4 keys and
+  // H/L both skip them) so an empty relay list or dead toggles can never be
+  // mistaken for a bug. Overview (install prompt) and System stay available.
+  readonly property bool pagesLocked: !service.installed
+  function pageAvailable(index) { return index === 0 || index === 4 || !pagesLocked }
+
   function showPage(index) {
-    pageIndex = Math.max(0, Math.min(4, index))
+    var target = Math.max(0, Math.min(4, index))
+    if (!pageAvailable(target)) return
+    pageIndex = target
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
   }
 
-  function movePage(delta) { showPage((pageIndex + delta + 5) % 5) }
+  function movePage(delta) {
+    var next = pageIndex
+    for (var i = 0; i < 5; i++) {
+      next = (next + delta + 5) % 5
+      if (pageAvailable(next)) { showPage(next); return }
+    }
+  }
+
+  onPagesLockedChanged: if (!pageAvailable(pageIndex)) showPage(0)
 
   function moveScroll(delta) {
     if (!pageFlick) return
@@ -510,7 +527,9 @@ Panel {
               Layout.fillWidth: true
               text: modelData
               selected: root.pageIndex === index
-              focusable: true
+              enabled: root.pageAvailable(index)
+              opacity: root.pageAvailable(index) ? 1 : 0.35
+              focusable: root.pageAvailable(index)
               foreground: root.foreground
               fontFamily: root.fontFamily
               horizontalPadding: Style.spacing.md
@@ -700,15 +719,6 @@ Panel {
             font.family: root.fontFamily
             font.pixelSize: Style.font.body
             wrapMode: Text.WordWrap
-          }
-
-          Button {
-            visible: !service.installed
-            text: "Open the mullvad-vpn package page"
-            bordered: true
-            focusable: true
-            foreground: root.foreground
-            onClicked: Quickshell.execDetached(["xdg-open", Model.ARCH_PACKAGE_URL])
           }
 
           Button {
@@ -1706,13 +1716,6 @@ Panel {
           enabled: service.updateCheckStatus !== "checking"
           foreground: root.foreground
           onClicked: service.checkForUpdates()
-        }
-        Button {
-          text: "Open the mullvad-vpn package page"
-          bordered: true
-          focusable: true
-          foreground: root.foreground
-          onClicked: Quickshell.execDetached(["xdg-open", Model.ARCH_PACKAGE_URL])
         }
         Button {
           visible: !service.installed || !service.daemonRunning

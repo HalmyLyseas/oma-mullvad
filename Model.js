@@ -14,11 +14,6 @@ var MAX_SERVERS_PER_LOCATION = 128;
 var MAX_PROVIDERS = 128;
 var MAX_EXCLUDED_PIDS = 256;
 
-// T1 (16-s8-feedback-spec.md): the safe, policy-clean "get Mullvad" link --
-// the Arch `extra` repository package page, no AUR involved. Constant, never
-// derived from remote/relay data; pinned exactly in test/model.test.js.
-var ARCH_PACKAGE_URL = "https://archlinux.org/packages/extra/x86_64/mullvad-vpn/";
-
 function text(value) {
     return value === undefined || value === null ? "" : String(value);
 }
@@ -875,7 +870,6 @@ function argv(action, params) {
 }
 
 var api = {
-    ARCH_PACKAGE_URL: ARCH_PACKAGE_URL,
     redact: redact,
     plainText: plainText,
     parseStatus: parseStatus,
