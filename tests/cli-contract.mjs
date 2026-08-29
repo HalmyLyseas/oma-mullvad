@@ -35,7 +35,7 @@ const version = readOnly(["--version"]);
 if (version.error?.code === "ENOENT") skip("mullvad CLI is not installed");
 assert.equal(version.status, 0, "mullvad --version failed");
 ensureNoAccount(version.stdout, "version");
-assert.match(version.stdout.trim(), /^mullvad-cli 2026\.4(?:\.\d+)?$/, "OmaMullvad targets Mullvad CLI 2026.4");
+assert.match(version.stdout.trim(), /^mullvad-cli 2026\.4(?:\.\d+)?$/, "Mullvad plugin targets Mullvad CLI 2026.4");
 
 const status = readOnly(["status", "--json"]);
 if (status.status !== 0) skip("Mullvad daemon is unavailable");
@@ -59,4 +59,4 @@ check(["dns", "get"], output => assert.match(output, /Custom DNS: (yes|no)/));
 check(["anti-censorship", "get"], output => assert.match(output, /mode: (auto|off|wireguard-port|udp2tcp|shadowsocks|quic|lwo)/));
 check(["split-tunnel", "list"], output => assert.match(output, /^Excluded PIDs:/));
 
-console.log("OmaMullvad Mullvad 2026.4 read-only CLI contract: ok");
+console.log("halmylyseas.mullvad 2026.4 read-only CLI contract: ok");

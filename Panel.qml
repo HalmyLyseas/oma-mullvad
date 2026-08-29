@@ -11,7 +11,7 @@ import "Model.js" as Model
 Panel {
   id: root
 
-  moduleName: "io.github.kallupx.oma-mullvad"
+  moduleName: "halmylyseas.mullvad"
   ipcTarget: moduleName
   manageIpc: false
 
@@ -728,7 +728,7 @@ Panel {
         Text {
           textFormat: Text.PlainText
           width: parent.width
-          text: "Your account number is sent to mullvad account login over stdin and is never saved by OmaMullvad."
+          text: "Your account number is sent to mullvad account login over stdin and is never saved by Mullvad."
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
