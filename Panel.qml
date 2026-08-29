@@ -15,11 +15,9 @@ Panel {
   ipcTarget: moduleName
   manageIpc: false
 
-  // Handed over by BarWidget.injectPanel() -- this file is only ever
-  // instantiated once the singleton service exists (BarWidget's Loader is
-  // gated on `svc !== null`), so `service` below is never null in normal
-  // operation and every `service.` read in this file is intentionally
-  // left unguarded (F1, exchange/10-s6-fix-spec.md).
+  // Handed over by BarWidget.injectPanel(); `service` is never null in
+  // normal operation (BarWidget's Loader is gated on `svc !== null`), so
+  // every `service.` read in this file is intentionally left unguarded.
   property var anchorItem: null
   property var hostWidget: null
   property var service: null
@@ -35,9 +33,8 @@ Panel {
   property var recentExcludedApps: []
   property var pendingConfirmation: null
   property bool syncingSettings: false
-  // T2: reused github-status idea -- relative-time labels on the System tab
-  // read this instead of Date.now() so a panel left open keeps counting up
-  // ("just now" -> "5m ago") while visible.
+  // Relative-time labels on the System tab read this instead of Date.now()
+  // so a panel left open keeps counting up ("just now" -> "5m ago").
   property double nowMs: Date.now()
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
@@ -45,11 +42,9 @@ Panel {
   readonly property color accent: Color.accent
   readonly property color dim: Qt.darker(foreground, 1.5)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  // F1: stateIcon/stateColor computation moved to BarWidget.qml (it needs
-  // svc-guarded versions to paint before the service resolves). Panel still
-  // uses stateIcon in the hero, so it reads the host widget's already-
-  // computed value instead of duplicating the logic, with a null-guard
-  // fallback for the rare case this panel is probed standalone.
+  // stateIcon/stateColor live in BarWidget.qml (svc-guarded, so it can
+  // paint before the service resolves); Panel reads the host widget's
+  // value instead, null-guarded for a panel probed standalone.
   readonly property string stateIcon: hostWidget && hostWidget.stateIcon !== undefined ? hostWidget.stateIcon : "connecting"
   readonly property color stateColor: hostWidget && hostWidget.stateColor !== undefined ? hostWidget.stateColor : foreground
   readonly property string tunnelHint: service.active ? "Disconnect Mullvad VPN" : "Connect Mullvad VPN"
@@ -273,7 +268,7 @@ Panel {
       ? String(constraint.hostname || "") : ""
   }
 
-  // T2: System tab -- UPDATES status line text, per 16-s8-feedback-spec.md.
+  // System tab: UPDATES status line text.
   function updateTargetsText() {
     var targets = arrayFrom(service.updateTargets)
     var parts = []
@@ -317,8 +312,7 @@ Panel {
     return flags
   }
 
-  // Excluded tab: the sorted/filtered app list is memoized per query and
-  // invalidated only when the shell's app library reports a change, so
+  // Excluded tab: the sorted/filtered app list is memoized per query, so
   // entering the tab does not re-sort every desktop entry each time the
   // page component is (re)created.
   property string _appRowsQuery: "\u0000"
@@ -326,9 +320,8 @@ Panel {
   function invalidateAppRows() { _appRowsQuery = "\u0000" }
 
   // Default (no query): the plugin's own recent list, resolved by id --
-  // O(10) lookups, no sort of the whole library, no dependency on a shell
-  // recents source (Omarchy has none). With a query: the library's fuzzy
-  // search, capped at 30.
+  // Omarchy has no recents source of its own. With a query: the library's
+  // fuzzy search, capped at 30.
   function appRows() {
     if (!bar || !bar.shell || !bar.shell.appLibrary) return []
     if (_appRowsQuery === appQuery) return _appRowsCache
@@ -358,11 +351,8 @@ Panel {
   }
 
   // Locations / Advanced / Excluded need the Mullvad CLI and daemon: while
-  // either is missing they are greyed out and unreachable (tab click, 2/3/4 keys and
-  // H/L both skip them) so an empty relay list or dead toggles can never be
-  // mistaken for a bug. Overview (install prompt) and System stay available.
-  // "CLI ready" = CLI present AND daemon reachable; both are needed for
-  // relays, settings and split tunneling, so the same lock covers both.
+  // either is missing they are greyed out and unreachable, so an empty
+  // relay list or dead toggle can never be mistaken for a bug.
   readonly property bool cliReady: service.installed && service.daemonRunning
   readonly property bool pagesLocked: !cliReady
   function pageAvailable(index) { return index === 0 || index === 4 || !pagesLocked }
@@ -426,14 +416,9 @@ Panel {
     confirmDialog.opened = true
   }
 
-  // S9 (19-s9-install-prompt-spec.md): shared by the Overview "unavailable"
-  // card and the System tab's UPDATES row, both of which surface the same
-  // action. installScript is resolved in Service.qml the same way as
-  // packageInfoScript; the launch mechanism mirrors Omarchy's own menu
-  // "Install > Service" entries (omarchy-menu.jsonc's install.service.*
-  // actions, e.g. omarchy-install-service-nordvpn), which run their
-  // installer the same way: a floating terminal launching a single script
-  // via omarchy-launch-floating-terminal-with-presentation.
+  // Shared by the Overview "unavailable" card and the System tab's UPDATES
+  // row. The launch mechanism mirrors Omarchy's own menu "Install >
+  // Service" entries: a floating terminal running a single script.
   function installActionLabel() {
     return !service.installed ? "Install Mullvad VPN" : "Enable the Mullvad daemon"
   }
@@ -472,9 +457,8 @@ Panel {
   }
   Component.onCompleted: syncInlineSettings()
 
-  // T2: relative-time labels on the System tab keep counting up live while
-  // the panel is open (github-status precedent), without waking up while
-  // closed.
+  // Relative-time labels on the System tab keep counting up live while the
+  // panel is open, without waking up while closed.
   Timer {
     interval: 30000
     running: root.opened
@@ -497,9 +481,9 @@ Panel {
     function nextFavorite(): string { return root.cycleFavorite(1) }
     function previousFavorite(): string { return root.cycleFavorite(-1) }
     function favorite(index: string): string { return root.chooseFavorite(index) }
-    // T2: checkUpdates() triggers the debounced hourly-network-check path
-    // and returns the resulting status, scriptable for verification.
-    // systemInfo() returns the full System-tab property set as JSON.
+    // checkUpdates() triggers the debounced hourly-network-check path and
+    // returns the resulting status. systemInfo() returns the full
+    // System-tab property set as JSON.
     function checkUpdates(): string { return service.checkForUpdates() }
     function systemInfo(): string {
       return JSON.stringify({
@@ -709,9 +693,8 @@ Panel {
         }
       }
 
-      // F5 (D6 fix): service.actionStatus was set everywhere ("Connecting…",
-      // "Wait for the current Mullvad action to finish.", "<Label> failed",
-      // "<Label> complete", ...) but never rendered anywhere -- dead UX.
+      // Renders service.actionStatus ("Connecting…", "<Label> failed", ...)
+      // -- previously set everywhere but never shown.
       Text {
         textFormat: Text.PlainText
         // Hidden when it would only repeat the lastError line just below.
@@ -770,9 +753,8 @@ Panel {
             text: service.state === "checking"
               ? "Checking for Mullvad VPN…"
               : !service.installed
-              // S9 (19-s9-install-prompt-spec.md): superseded T1's link-only
-              // prose -- the panel now also offers a real install prompt via
-              // Omarchy's own mechanism (the button below), never the AUR.
+              // A real install prompt via Omarchy's own mechanism (the
+              // button below), never the AUR.
               ? "Mullvad CLI was not found."
               : "The Mullvad daemon is not running."
             color: root.urgent
@@ -1651,7 +1633,7 @@ Panel {
     }
   }
 
-  // T2 (16-s8-feedback-spec.md): 5th page -- Mullvad binaries/daemon/updates.
+  // 5th page: Mullvad binaries/daemon/updates.
   Component {
     id: systemPage
 
@@ -1669,8 +1651,7 @@ Panel {
         fontFamily: root.fontFamily
         iconComponent: Component {
           // "system" matches no ThemeIcon state branch, so only the base
-          // shield outline renders (no checkmark/slash/dots overlay) --
-          // deliberately the "plain shield" the spec asks for, with zero
+          // shield outline renders -- a deliberately plain shield, no
           // ThemeIcon.qml changes needed.
           ThemeIcon { iconSize: Style.font.display; state: "system"; color: root.foreground; urgentColor: root.urgent }
         }

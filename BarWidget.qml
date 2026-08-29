@@ -1,49 +1,6 @@
-// BarWidget.qml -- bar entry point for halmylyseas.mullvad.
-//
-// F1 (D1 fix, exchange/10-s6-fix-spec.md): Service.qml is now a machine-wide
-// singleton (manifest kind "service", created once by shell.ensureService()).
-// This widget only ever binds to it via shell.serviceFor(moduleName) --
-// reactive, because shell._services is reassigned (never mutated) on every
-// service add (see /usr/share/omarchy/shell/shell.qml ensureService()).
-//
-// Panel.qml is hosted from here via a Loader gated `active: root.svc !==
-// null` (N4, 25-fable-review-s10.md). _loadPanel() calls
-// panelLoader.setSource(Qt.resolvedUrl("Panel.qml"), { bar, settings,
-// anchorItem, hostWidget, service }) whenever the Loader is active and not
-// yet loaded (checked via `panelLoader.status === Loader.Null`) -- i.e. on
-// Component.onCompleted and on every onSvcChanged, whichever fires first, or
-// again after a later re-arm (see below). Quickshell's
-// `Loader.setSource(url, initialProperties)` applies those properties as
-// the component's initial property values, evaluated before the component's
-// own bindings run -- so Panel.qml's ~150 unguarded `service.`/`bar.`/etc.
-// reads never evaluate against `null` for even a single frame on a freshly
-// loaded Panel.
-//
-// C3 (12-fable-review.md) removed this `active` gate on the theory that the
-// setSource-with-initial-properties mechanism alone was sufficient, since
-// two restarts + a panel open produced zero TypeErrors with it removed at
-// the time. That measurement was real but incomplete: it did not cover the
-// DESTROY path. `/usr/share/omarchy/shell/shell.qml`'s `_syncServices()`
-// destroys and recreates a plugin's service instance if the plugin registry
-// transiently reports it disabled at startup (a real, observed race, not
-// hypothetical -- exchange/24-s10-native-process.md deviation 5's ~35-88
-// line TypeError bursts on `omarchy restart shell`). Without the gate, `svc`
-// transitions non-null -> null -> (new instance) non-null on the SAME
-// BarWidget instance; `onSvcChanged` still fires `injectPanel()` while
-// `svc` is null, which used to write `service = null` straight into the
-// ALREADY-LIVE Panel instance from the first (now-destroyed) service --
-// every one of Panel's ~150 unguarded `service.` reads then throws. Putting
-// the gate back fixes this at the root: when `svc` goes null, the Loader
-// deactivates (destroying the stale Panel, resetting `status` to
-// `Loader.Null`); when a NEW `svc` arrives, `_loadPanel()`'s `status ===
-// Loader.Null` check re-fires `setSource` with the new instance, producing
-// a fresh, properly-initialized Panel instead of mutating a live one to
-// null and back. `injectPanel()` additionally returns early whenever
-// `root.svc` is null, as a second, redundant guard for the same event (see
-// docs/developers.md "How the Panel Loader avoids a null-service Panel
-// (C3)" for the corrected writeup). Every `svc` read in THIS file must
-// still be guarded -- the bar paints this widget before the service
-// resolves on first load.
+// BarWidget.qml -- bar entry point for halmylyseas.mullvad. Binds the
+// machine-wide Service.qml singleton via shell.serviceFor(moduleName) and
+// hosts Panel.qml through a Loader; see docs/developers.md, Architecture.
 import QtQuick
 import qs.Commons
 import qs.Ui
@@ -89,10 +46,9 @@ BarWidget {
   // handed to it: the bar, this widget's settings, the button to anchor
   // against, this widget (hostWidget), and the resolved service instance.
   function injectPanel() {
-    // N4: never write into a live Panel while svc is null (see file header)
-    // -- redundant with the Loader's own `active` gate, but cheap and
-    // catches this even if injectPanel() is ever called from somewhere the
-    // gate doesn't cover.
+    // Never write into a live Panel while svc is null -- redundant with the
+    // Loader's own `active` gate, but cheap, and catches injectPanel() being
+    // called from somewhere that gate doesn't cover.
     if (!root.svc) return
     var target = panelLoader.item
     if (!target) return
@@ -103,15 +59,9 @@ BarWidget {
     if ("service" in target) target.service = root.svc
   }
 
-  // N4/C3: creates Panel.qml once the Loader is active (svc non-null) and
-  // not already loaded, passing every dependency as an INITIAL property via
-  // setSource(url, props) rather than a `source:` binding + post-hoc
-  // injection -- see the file-header comment. The `status === Loader.Null`
-  // check makes this idempotent: harmless to call again from
-  // Component.onCompleted, onSvcChanged (whichever fires first), or a LATER
-  // onSvcChanged after the Loader deactivated (svc went null) and then
-  // reactivated (a new svc instance arrived) -- each such cycle gets a
-  // fresh Panel, never a stale one mutated back to non-null.
+  // Creates Panel.qml once the Loader is active and not already loaded,
+  // passing every dependency as an INITIAL property via setSource(url,
+  // props) so none of Panel's ~150 unguarded reads ever see a null service.
   function _loadPanel() {
     if (!root.svc || panelLoader.status !== Loader.Null) return
     panelLoader.setSource(Qt.resolvedUrl("Panel.qml"), {
@@ -120,12 +70,9 @@ BarWidget {
     })
   }
 
-  // Pushes the widget's own refreshIntervalSec setting down onto the
-  // singleton service -- the service does not read bar-widget `settings`
-  // itself (it is shared machine-wide and has no single owning widget), so
-  // the widget is responsible for translating its setting into the
-  // service's plain `pollInterval` (ms), clamped the same way the service
-  // clamps it internally.
+  // Pushes the widget's own refreshIntervalSec setting onto the singleton
+  // service, which has no single owning widget to read settings from --
+  // clamped the same way the service clamps pollInterval internally.
   function _pushPollInterval() {
     if (!svc) return
     var seconds = Number(root.setting("refreshIntervalSec", 30)) || 30
@@ -147,8 +94,7 @@ BarWidget {
 
   Loader {
     id: panelLoader
-    // N4 (25-fable-review-s10.md): re-instated -- see file header. No
-    // `source` binding; created via root._loadPanel()'s setSource(url,
+    // No `source` binding; created via root._loadPanel()'s setSource(url,
     // initialProps) call, which only ever runs while this is active.
     active: root.svc !== null
     visible: false
