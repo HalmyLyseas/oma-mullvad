@@ -38,7 +38,7 @@ jobs:
           # the real binary); jq is what usr/share/omarchy/bin/
           # omarchy-plugin-validate itself needs (checked against the
           # installed script's own dependencies at authoring time).
-          pacman -Syu --noconfirm quickshell cage nodejs procps-ng pacman-contrib jq
+          pacman -Syu --noconfirm quickshell cage nodejs procps-ng pacman-contrib jq jq
 
       - name: Extract the Omarchy shell QML tree and plugin-validate script
         run: |
@@ -64,7 +64,9 @@ jobs:
             echo "expected exactly one omarchy package archive, found ${#pkgs[@]}: ${pkgs[*]}" >&2
             exit 1
           fi
-          bsdtar -x -C / -f "${pkgs[0]}" usr/share/omarchy/shell usr/share/omarchy/bin
+          # usr/share/omarchy/bin/omarchy-plugin-validate is a symlink into usr/bin.
+          bsdtar -x -C / -f "${pkgs[0]}" usr/share/omarchy/shell usr/share/omarchy/bin usr/bin/omarchy-plugin-validate
+          ls -la /usr/bin/omarchy-plugin-validate /usr/share/omarchy/shell/Ui/Panel.qml
 
       - name: qmllint every .qml file (0 errors required, warnings allowed)
         run: |
@@ -81,7 +83,7 @@ jobs:
           exit $status
 
       - name: omarchy plugin validate (manifest schema, entry points, no symlinks)
-        run: /usr/share/omarchy/bin/omarchy-plugin-validate .
+        run: /usr/bin/omarchy-plugin-validate .
 
       - name: Node unit tests (Model.js, QML Text-sink audit, comment hygiene)
         run: node --test test/*.test.js
