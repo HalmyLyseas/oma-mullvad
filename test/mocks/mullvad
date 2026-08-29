@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
-# PATH-shadowing mock of the `mullvad` CLI for the deterministic probe
-# suite; never touches the real daemon. Responses are canned fixtures under
-# test/fixtures/cli/ or a synthesized failure/hang/flood shape.
-#
-# $MULLVAD_MOCK_MODE selects ok/hang/flood/fail/action-hang (default "ok").
-# `account login` reads one stdin line and echoes its length, so a test can
-# prove the CLI actually received it, or fails on an empty line like the real one.
-#
-# $MULLVAD_MOCK_LOG, when set, logs every invocation's argv so
-# test/probe/run can prove PATH shadowing actually took effect.
+# PATH-shadowing mock of the `mullvad` CLI (never the real daemon): canned
+# fixtures from test/fixtures/cli/, or hang/flood/fail shapes per $MULLVAD_MOCK_MODE.
+# `account login` echoes the stdin line length; $MULLVAD_MOCK_LOG records every argv.
 set -uo pipefail
 
 # Resolved via `readlink -f`, not a plain dirname of BASH_SOURCE: the

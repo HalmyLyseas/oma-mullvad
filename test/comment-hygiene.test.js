@@ -15,11 +15,9 @@ function shippedFiles() {
     .filter(f => !f.startsWith("test/fixtures/") && f !== "preview.png");
 }
 
-// A comment "run" is consecutive whole-comment lines with content; a blank
-// line or a bare "//"/"#" separator breaks it without extending the run
-// (a shebang's #! is never counted either).
-//
-// Markdown is prose, not commented code, so this rule does not apply to it.
+// A comment "run" is any stretch of consecutive whole-comment lines, bare
+// "//"/"#" separators included (a reader sees one block); only a non-comment
+// line ends it. Shebangs are skipped; Markdown is prose and exempt.
 function commentRuns(file, text) {
   if (extname(file) === ".md") return [];
   const lines = text.split("\n");
@@ -29,8 +27,7 @@ function commentRuns(file, text) {
     const trimmed = lines[i].trim();
     const isShebang = i === 0 && trimmed.startsWith("#!");
     const marker = trimmed.startsWith("//") ? "//" : trimmed.startsWith("#") ? "#" : null;
-    const hasContent = marker && trimmed.slice(marker.length).trim() !== "";
-    const isComment = !isShebang && hasContent;
+    const isComment = !isShebang && marker !== null;
     if (isComment) {
       if (len === 0) start = i;
       len++;

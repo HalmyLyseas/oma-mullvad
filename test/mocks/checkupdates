@@ -1,11 +1,7 @@
 #!/usr/bin/env bash
-# PATH-shadowing mock of pacman-contrib's checkupdates for
-# scripts/mullvad-update-check tests. $MOCK_MODE selects updates/none/
-# offline/hang, matching checkupdates' own exit-code contract.
-#
-# $MULLVAD_MOCK_LOG, when set, logs "PID=$$ ..." like test/mocks/mullvad
-# does, so test/probe/run's check_no_orphans can prove this process itself
-# is gone afterwards, not just the wrapper script that spawned it.
+# PATH-shadowing mock of checkupdates; $MOCK_MODE = updates|none|offline|hang,
+# matching the real exit-code contract. $MULLVAD_MOCK_LOG records "PID=$$" so
+# test/probe/run can prove this process itself is gone afterwards.
 set -uo pipefail
 MODE="${MOCK_MODE:-updates}"
 

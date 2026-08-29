@@ -2,12 +2,9 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// A ShellRoot that Loaders the real Service.qml (never a copy), waits for
-// the initial read queue to drain, then drives one of a few scenarios
-// selected by env vars, printing one "PROBE_RESULT {...}" JSON line.
-//
-// Debug counters (`_readWatchdogFiredCount` etc.) may not exist on an older
-// Service.qml, so every read of one goes through the hasDebugCounters guard.
+// Loads the real Service.qml, waits for its read queue to drain, drives one
+// env-selected scenario and prints a single "PROBE_RESULT {...}" JSON line.
+// Debug counters are read through hasDebugCounters so older builds still run.
 ShellRoot {
   id: probeRoot
 
@@ -112,13 +109,9 @@ ShellRoot {
     }
   }
 
-  // Removes the per-run temp symlink, then drives connectTunnel() first,
-  // while `installed` is still stale-true, so it reaches actionProcess's
-  // own failed-start path instead of bailing out at the `!installed` guard.
-  //
-  // Only then the read side: refreshStatus() while still stale-true, then
-  // again once daemonRunning is false -- the probe path that actually flips
-  // `installed`.
+  // Removes the temp `mullvad` symlink, then connectTunnel() while `installed`
+  // is still stale-true (reaches the action failed-start path), then
+  // refreshStatus() twice: the second one runs the probe that flips `installed`.
   Process {
     id: removeLinkProcess
     running: false

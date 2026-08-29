@@ -1,11 +1,7 @@
 #!/bin/bash
-# Read-only wrapper around `checkupdates` (pacman-contrib), reporting ONLY
-# the two Mullvad packages. Exit 0 for updates found or none, 3 for
-# "could not check" (offline/lock/timeout), letting the caller tell those apart.
-#
-# Runs `timeout ... checkupdates` backgrounded (`&` + `wait`) so a TERM/INT
-# to this script's own PID relays to it via an explicit trap -- a foreground
-# `cmd >file` does not propagate a received signal to its child at all.
+# Read-only `checkupdates` wrapper reporting only the two Mullvad packages.
+# Exit 0 = checked (updates or none), 3 = could not check (offline/lock/timeout).
+# checkupdates runs backgrounded so a TERM to this script is relayed to it via the trap.
 set -uo pipefail
 
 timeout_seconds="${MULLVAD_UPDATE_CHECK_TIMEOUT:-120}"

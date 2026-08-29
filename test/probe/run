@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
-# Deterministic mock-CLI probe suite for Service.qml's Process pipeline.
-# Runs test/probe/service-probe.qml via `qs -n -p ...` with PATH shadowed
-# so `mullvad`/`checkupdates` resolve to test/mocks/, never the real daemon.
-#
-# PACMAN_LOCAL_DIR points at a fixture pacman tree so mullvad-package-info
-# never reads this box's real package database. Skips with a notice if no
-# `qs` binary / Wayland session is available.
-#
-# Output goes to files, never a pipe -- block-buffering under `qs` would
-# otherwise swallow console.log.
+# Mock-CLI probe suite: runs test/probe/service-probe.qml under `qs -n -p` with
+# PATH shadowed to test/mocks/ and PACMAN_LOCAL_DIR on a fixture tree, so nothing
+# touches the real daemon or package DB. Skips without `qs`; logs go to files (qs block-buffers pipes).
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
