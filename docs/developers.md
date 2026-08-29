@@ -200,8 +200,9 @@ file — a plain hot-reload will not pick it up.
   comment-hygiene scan), `scripts.test.sh` (against `test/fixtures`/
   `test/mocks`), `test/cli-contract.mjs`, then `test/probe/run`.
 - `test/probe/run` is the deterministic mock-CLI probe suite for
-  `Service.qml`'s Process pipeline: `test/mocks/mullvad`/`checkupdates`
-  shadow the real binaries on `PATH`. `test/probe/service-probe.qml`
+  `Service.qml`'s Process pipeline: `test/mocks/mullvad`/`checkupdates`/`ps`
+  shadow the real binaries on `PATH` (`ps` serves the fixture process table
+  behind the excluded-processes read). `test/probe/service-probe.qml`
   (`qs -n -p ...`) Loaders the real `Service.qml`, drains its read queue,
   drives a scenario selected by env vars, and prints one JSON line the
   runner asserts against, including that no mock process is left running.

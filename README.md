@@ -10,6 +10,7 @@ Mullvad VPN controls for the Omarchy Quattro bar.
 - Filter by provider, ownership, and IP version
 - Configure DNS, anti-censorship, LAN sharing, and lockdown mode
 - Launch apps outside the VPN (the Excluded tab lists your 10 most recent; search for the rest)
+- Excluded lists each launched app with its process count
 - View Mullvad relay cities on a world map
 
 This plugin follows the active Omarchy theme and works with the stock bar and Shibumi.
