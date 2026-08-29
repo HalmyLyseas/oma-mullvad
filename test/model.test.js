@@ -32,6 +32,19 @@ test("status JSON and listen events normalize connection details", () => {
     assert.equal(status.location.entryHostname, "se-sto-wg-001");
     assert.equal(status.lockedDown, true);
 
+    // C1 (12-fable-review.md): `locked_down` is only present on the
+    // `disconnected` TunnelState variant. When neither `details.locked_down`
+    // nor `value.locked_down` is a boolean, lockedDown must be `undefined`
+    // (not coerced to false) so Service.qml's `!== undefined` guard actually
+    // leaves the last known lockdown state alone instead of clobbering it.
+    assert.equal(Model.parseStatus({
+        state: "connected",
+        details: { location: { country: "Finland", city: "Helsinki" } }
+    }).lockedDown, undefined);
+    assert.equal(Model.parseStatus({
+        state: "disconnected", details: { locked_down: false }
+    }).lockedDown, false);
+
     assert.equal(Model.parseStatus({ state: "disconnecting", details: "nothing" }).disconnectingAction,
         "nothing");
     assert.equal(Model.parseStatus({ state: "disconnecting", details: "reconnect" }).disconnectingAction,

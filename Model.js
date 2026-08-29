@@ -117,7 +117,18 @@ function parseStatus(raw) {
             entryHostname: validateHostname(entryHostname) ? entryHostname : "",
             mullvadExitIp: location.mullvad_exit_ip === true
         },
-        lockedDown: details.locked_down === true || value.locked_down === true
+        // C1 (12-fable-review.md): Mullvad's `TunnelState` only carries
+        // `locked_down` in the `disconnected` variant -- every other variant
+        // (connected/connecting/disconnecting/error) has no such field at
+        // all. Returning a strict boolean here made a *missing* field read
+        // as `false`, so `Service.qml`'s `parsed.lockedDown !== undefined`
+        // guard never actually skipped -- every connected-state poll or
+        // listener event silently forced the UI's `lockdown` property back
+        // to false even when lockdown mode was on. Only report a boolean
+        // when the payload actually contained one; otherwise `undefined` so
+        // the caller's guard leaves the last known value alone.
+        lockedDown: typeof details.locked_down === "boolean" ? details.locked_down
+            : typeof value.locked_down === "boolean" ? value.locked_down : undefined
     };
 }
 
