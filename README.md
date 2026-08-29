@@ -31,7 +31,10 @@ omarchy plugin enable halmylyseas.mullvad --section right
 omarchy restart shell
 ```
 
-Requires Mullvad VPN 2026.4 (`mullvad-vpn` from the Arch `extra` repository, or the AUR `mullvad-vpn-bin`) with the daemon running.
+Requires Mullvad VPN 2026.4 with the daemon running. Install
+[`mullvad-vpn`](https://archlinux.org/packages/extra/x86_64/mullvad-vpn/)
+from the Arch `extra` repository (no AUR needed) — the panel's Overview page
+links to the same page when the CLI isn't found.
 
 ## Controls
 

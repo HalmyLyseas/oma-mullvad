@@ -205,6 +205,11 @@ lwo settings: any port`);
     ]);
 });
 
+test("T1: the safe Mullvad package-page URL is a fixed archlinux.org extra-repo link", () => {
+    assert.equal(Model.ARCH_PACKAGE_URL, "https://archlinux.org/packages/extra/x86_64/mullvad-vpn/");
+    assert.match(Model.ARCH_PACKAGE_URL, /^https:\/\/archlinux\.org\//);
+});
+
 test("trust-boundary validation accepts useful values and rejects malformed input", () => {
     assert.equal(Model.validatePort(53), true);
     assert.equal(Model.validatePort(0), false);

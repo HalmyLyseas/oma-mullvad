@@ -585,27 +585,46 @@ Panel {
       BorderSurface {
         visible: !service.installed || !service.daemonRunning
         width: parent.width
-        implicitHeight: unavailableText.implicitHeight + Style.space(24)
+        implicitHeight: unavailableColumn.implicitHeight + Style.space(24)
         color: Style.normalFillFor(root.foreground, Color.accent)
         borderSpec: Border.controlSpec("normal", root.foreground, Color.accent)
         radius: Style.cornerRadius
 
-        Text {
-          textFormat: Text.PlainText
-          id: unavailableText
+        Column {
+          id: unavailableColumn
           anchors.left: parent.left
           anchors.right: parent.right
           anchors.verticalCenter: parent.verticalCenter
           anchors.margins: Style.space(12)
-          text: service.state === "checking"
-            ? "Checking for Mullvad VPN…"
-            : !service.installed
-            ? "Mullvad CLI was not found. Install the mullvad-vpn package, then press refresh."
-            : "The Mullvad daemon is unavailable. Start mullvad-daemon, then press refresh."
-          color: root.urgent
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.body
-          wrapMode: Text.WordWrap
+          spacing: Style.space(8)
+
+          Text {
+            textFormat: Text.PlainText
+            id: unavailableText
+            width: parent.width
+            text: service.state === "checking"
+              ? "Checking for Mullvad VPN…"
+              : !service.installed
+              // T1 (16-s8-feedback-spec.md): the old AUR-install prose was
+              // removed by an earlier pass; this replaces it with a link to
+              // the safe, official Arch `extra`-repo package page instead
+              // of ever running an installer for the user.
+              ? "Mullvad CLI was not found. Install the mullvad-vpn package from the Arch extra repository (no AUR needed), then press refresh."
+              : "The Mullvad daemon is unavailable. Start mullvad-daemon, then press refresh."
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.body
+            wrapMode: Text.WordWrap
+          }
+
+          Button {
+            visible: !service.installed
+            text: "Open the mullvad-vpn package page"
+            bordered: true
+            focusable: true
+            foreground: root.foreground
+            onClicked: Quickshell.execDetached(["xdg-open", Model.ARCH_PACKAGE_URL])
+          }
         }
       }
 
