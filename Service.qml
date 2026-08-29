@@ -614,6 +614,9 @@ Item {
   // so the UI can show "last known result"): an offline box therefore
   // cannot re-run `checkupdates` more than once a minute from "Check now".
   function checkForUpdates() {
+    // Nothing installed => nothing to check. Refuse instead of letting
+    // checkupdates "confirm" an up-to-date package that does not exist.
+    if ((packages || []).length === 0) return updateCheckStatus
     if (updateCheckStatus !== "checking" && !updateCheckProcess.running
         && (_updateCheckAttemptedAt === 0 || Date.now() - _updateCheckAttemptedAt >= 60000)) {
       _updateCheckAttemptedAt = Date.now()

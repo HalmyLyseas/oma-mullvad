@@ -275,7 +275,12 @@ Panel {
     return parts.join(", ")
   }
 
+  // No Mullvad package on the system => nothing to check; checkupdates
+  // would trivially report "nothing" and read as a bogus "Up to date".
+  readonly property bool updateCheckPossible: (service.packages || []).length > 0
+
   function updatesStatusText() {
+    if (!updateCheckPossible) return "Install Mullvad VPN to enable update checks"
     var status = service.updateCheckStatus
     if (status === "checking") return "Checking for updates…"
     if (status === "unavailable")
@@ -1726,8 +1731,9 @@ Panel {
         Button {
           text: "Check now"
           bordered: true
-          focusable: true
-          enabled: service.updateCheckStatus !== "checking"
+          focusable: root.updateCheckPossible
+          enabled: root.updateCheckPossible && service.updateCheckStatus !== "checking"
+          opacity: root.updateCheckPossible ? 1 : 0.35
           foreground: root.foreground
           onClicked: service.checkForUpdates()
         }
