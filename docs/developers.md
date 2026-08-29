@@ -275,6 +275,18 @@ file — a plain hot-reload will not pick it up.
 - Live/mutating action tests against the real daemon are only ever run as
   an explicitly human-authorised pass, never routine development.
 
+## CI
+
+`.github/workflows/test.yml` runs the same suites (`node --test`,
+`test/scripts.test.sh`, `test/cli-contract.mjs`) on `archlinux:latest`,
+then the two probe suites under `cage` with a headless wlroots backend.
+The `omarchy` package is never installed there — it pulls in the whole
+desktop — only its `/usr/share/omarchy/shell` subtree is extracted from
+the downloaded package. `test/ci-local` runs the identical steps on a dev
+box (`--no-cage` uses this session's own Wayland display instead). See
+`docs/threat-model.md` for why `.github/**` is exempt from the repo's own
+comment-hygiene scan.
+
 ## Releasing
 
 Creating the public GitHub repository and adding it as `origin` is a human
