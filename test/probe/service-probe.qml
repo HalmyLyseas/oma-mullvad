@@ -26,6 +26,22 @@ ShellRoot {
   // MULLVAD_MOCK_LINK at a temp symlink; this scenario deletes it to
   // simulate an uninstall, then drives Service.qml's own recovery path.
   property bool removedScenario: Quickshell.env("MULLVAD_PROBE_REMOVED") === "1"
+  // State-truthfulness matrix: one of a/b/c/d/e/race, or "" for the
+  // scenarios above. Drives a scripted mullvad listener, recording every
+  // observed transition until the expected final state settles.
+  property string matrixKind: Quickshell.env("MULLVAD_PROBE_MATRIX") || ""
+  property string matrixExpectFinal: ({
+    a: "connected", b: "disconnected", c: "blocked", d: "connected", e: "connected",
+    race: "connected"
+  })[matrixKind] || ""
+  property var matrixSteps: []
+  property string _lastMatrixKey: ""
+  property int _matrixStableTicks: 0
+  property int _matrixElapsedMs: 0
+  // _statusHistory entries before this offset predate the scenario (the
+  // baseline pre-listener poll always applies once) -- excluded so
+  // "a poll observed disconnected" proves the SCENARIO's poll, not that one.
+  property int _matrixHistoryOffset: 0
 
   Loader {
     id: loader
@@ -40,6 +56,10 @@ ShellRoot {
       if ("readTimeoutMs" in item) item.readTimeoutMs = 1500
       if ("actionTimeoutMs" in item) item.actionTimeoutMs = 1500
       if ("updateCheckTimeoutMs" in item) item.updateCheckTimeoutMs = 1200
+      if ("listenerRestartMs" in item) item.listenerRestartMs = 300
+      // The race scenario's deliberately-slow poll (~1500ms) must not trip
+      // the generic 1500ms read watchdog before it even returns its data.
+      if (matrixKind === "race" && "readTimeoutMs" in item) item.readTimeoutMs = 4000
       settleTimer.start()
     }
   }
@@ -88,7 +108,14 @@ ShellRoot {
   // performs ONLY connect, to exercise the action watchdog in isolation.
   function afterReadsDrained() {
     elapsedMs = 0
-    if (removedScenario) {
+    if (matrixKind === "race") {
+      _matrixHistoryOffset = (debugProp("_statusHistory") || []).length
+      raceTriggerProcess.command = ["touch", Quickshell.env("MULLVAD_MOCK_STATUS_DELAY_TRIGGER")]
+      raceTriggerProcess.running = true
+    } else if (matrixKind) {
+      _matrixHistoryOffset = (debugProp("_statusHistory") || []).length
+      matrixTimer.start()
+    } else if (removedScenario) {
       removeLinkProcess.command = ["rm", "-f", Quickshell.env("MULLVAD_MOCK_LINK")]
       removeLinkProcess.running = true
     } else if (actionOnly) {
@@ -128,6 +155,100 @@ ShellRoot {
     }
   }
 
+  // Fires one manually-triggered, mock-delayed status poll (the poll vs.
+  // listener race). touch's own exit guarantees the trigger file is
+  // visible before refreshStatus() starts the real read.
+  Process {
+    id: raceTriggerProcess
+    running: false
+    onExited: function() {
+      probeRoot.service.refreshStatus()
+      matrixTimer.start()
+      raceWaitTimer.start()
+    }
+  }
+
+  // Fixed wait for the race scenario only: it must observe the outcome
+  // AFTER the slow poll has had time to return and possibly (wrongly)
+  // apply, not stop early just because the listener's value looked stable.
+  Timer {
+    id: raceWaitTimer
+    interval: 2400
+    repeat: false
+    onTriggered: {
+      matrixTimer.stop()
+      probeRoot._matrixFinish("")
+    }
+  }
+
+  // Records every distinct (state, disconnectingAction, tunnelDropWarning,
+  // lastError) combination seen -- timing-robust against exact mock delay
+  // drift, and it naturally captures every intermediate step.
+  function _matrixSnapshot() {
+    matrixSteps = matrixSteps.concat([{
+      state: service.state,
+      connected: service.connected,
+      active: service.active,
+      tunnelDropWarning: service.tunnelDropWarning,
+      statusText: service.statusText,
+      lastError: service.lastError,
+      stateIcon: service.stateIcon,
+      disconnectingAction: service.disconnectingAction,
+      lastListenerLineChars: debugProp("_lastListenerLineChars")
+    }])
+  }
+
+  Timer {
+    id: matrixTimer
+    interval: 50
+    repeat: true
+    onTriggered: {
+      probeRoot._matrixElapsedMs += interval
+      var key = probeRoot.service.state + "|" + probeRoot.service.disconnectingAction
+        + "|" + probeRoot.service.tunnelDropWarning + "|" + probeRoot.service.lastError
+      if (key !== probeRoot._lastMatrixKey) {
+        probeRoot._lastMatrixKey = key
+        probeRoot._matrixStableTicks = 0
+        probeRoot._matrixSnapshot()
+      } else {
+        probeRoot._matrixStableTicks++
+      }
+      if (probeRoot.matrixKind === "race") return // raceWaitTimer owns finishing
+      var settled = probeRoot.service.state === probeRoot.matrixExpectFinal && probeRoot._matrixStableTicks >= 6
+      if (settled || probeRoot._matrixElapsedMs > 15000) {
+        matrixTimer.stop()
+        probeRoot._matrixFinish(settled ? "" : "matrix scenario did not reach its expected final state within 15s")
+      }
+    }
+  }
+
+  function _matrixFinish(note) {
+    var trace = matrixSteps.map(function(s) { return s.state }).join(">")
+    var sawDisconnectedMid = matrixSteps.some(function(s) { return s.state === "disconnected" })
+    var history = (debugProp("_statusHistory") || []).slice(_matrixHistoryOffset)
+    var sawPollDisconnected = false
+    for (var i = 0; i < history.length; i++)
+      if (history[i].source === "poll" && history[i].state === "disconnected") sawPollDisconnected = true
+    var last = matrixSteps.length ? matrixSteps[matrixSteps.length - 1] : {}
+    finish(note, {
+      matrixKind: matrixKind,
+      stepsTrace: trace,
+      steps: matrixSteps,
+      stepsCount: matrixSteps.length,
+      sawDisconnectedMid: sawDisconnectedMid,
+      sawPollDisconnected: sawPollDisconnected,
+      lastListenerLineChars: debugProp("_lastListenerLineChars"),
+      finalState: last.state,
+      finalConnected: last.connected,
+      finalActive: last.active,
+      finalTunnelDropWarning: last.tunnelDropWarning,
+      finalStatusText: last.statusText,
+      finalStateIcon: last.stateIcon,
+      finalLastError: last.lastError,
+      finalDisconnectingAction: last.disconnectingAction
+    })
+  }
+
   // updateCheckProcess is a separate process/timer, never counted in
   // `busy`, so it is driven as its own step after the scenario above
   // finishes, only when test/probe/run asked for it.
@@ -161,7 +282,7 @@ ShellRoot {
     return (service && (name in service)) ? service[name] : null
   }
 
-  function finish(note) {
+  function finish(note, extra) {
     if (done) return
     done = true
     var summary = {
@@ -186,6 +307,7 @@ ShellRoot {
       updateCheckWatchdogFiredCount: debugProp("_updateCheckWatchdogFiredCount"),
       note: note
     }
+    for (var key in (extra || {})) summary[key] = extra[key]
     console.log("PROBE_RESULT " + JSON.stringify(summary))
     Qt.quit()
   }

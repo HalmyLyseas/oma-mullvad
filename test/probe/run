@@ -362,6 +362,206 @@ fi
 check_no_orphans "$mocklog" "removed"
 
 echo
+echo "== state-truthfulness matrix (S15: scripted listener transitions) =="
+
+LISTEN_SCRIPTS="$PLUGIN_DIR/test/fixtures/cli/listen-scripts"
+
+# steps_find <json> <state> <prop> -- first matrixSteps entry with that
+# state, read one property (empty string if no such step or key).
+steps_find() {
+  node -e '
+    try {
+      const d = JSON.parse(process.argv[1]);
+      const s = (d.steps || []).find(x => x.state === process.argv[2]);
+      const v = s ? s[process.argv[3]] : undefined;
+      process.stdout.write(v === undefined || v === null ? "" : String(v));
+    } catch (e) { process.stdout.write(""); }
+  ' "$1" "$2" "$3"
+}
+
+# steps_any <json> <prop> -- "true" if some step's property is a
+# non-empty, non-zero, non-false value (JS truthiness).
+steps_any() {
+  node -e '
+    try {
+      const d = JSON.parse(process.argv[1]);
+      const found = (d.steps || []).some(x => !!x[process.argv[2]]);
+      process.stdout.write(found ? "true" : "false");
+    } catch (e) { process.stdout.write("false"); }
+  ' "$1" "$2"
+}
+
+# steps_none <json> <prop> <value> -- "true" if NO step's property equals
+# the given string (e.g. state never becomes "unknown").
+steps_none() {
+  node -e '
+    try {
+      const d = JSON.parse(process.argv[1]);
+      const bad = (d.steps || []).some(x => String(x[process.argv[2]]) === process.argv[3]);
+      process.stdout.write(bad ? "false" : "true");
+    } catch (e) { process.stdout.write("false"); }
+  ' "$1" "$2" "$3"
+}
+
+echo
+echo "-- (a) connect sequence: connecting -> connected --"
+log="$(run_scenario matrix-a MULLVAD_MOCK_MODE=ok MULLVAD_PROBE_MATRIX=a \
+  MULLVAD_MOCK_LISTEN_SCRIPT="$LISTEN_SCRIPTS/connect.txt")"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/matrix-a.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "matrix-a: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "matrix-a: probe printed a PROBE_RESULT line"
+  [[ -z "$(field "$json" note)" ]] && ok "matrix-a: no harness timeout/note" \
+    || not_ok "matrix-a: no harness timeout/note (got: $(field "$json" note))"
+  [[ "$(field "$json" stepsTrace)" == "connecting>connected" ]] \
+    && ok "matrix-a: observed connecting -> connected" \
+    || not_ok "matrix-a: observed connecting -> connected (got: $(field "$json" stepsTrace))"
+  [[ "$(field "$json" finalState)" == "connected" ]] && ok "matrix-a: finalState=connected" \
+    || not_ok "matrix-a: finalState=connected (got: $(field "$json" finalState))"
+  [[ "$(field "$json" finalActive)" == "true" ]] && ok "matrix-a: finalActive=true" \
+    || not_ok "matrix-a: finalActive=true"
+  [[ "$(field "$json" finalStateIcon)" == "connected" ]] && ok "matrix-a: finalStateIcon=connected" \
+    || not_ok "matrix-a: finalStateIcon=connected (got: $(field "$json" finalStateIcon))"
+fi
+check_no_orphans "$mocklog" "matrix-a"
+
+echo
+echo "-- (b) tunnel drop: connected -> error -> disconnected --"
+log="$(run_scenario matrix-b MULLVAD_MOCK_MODE=ok MULLVAD_PROBE_MATRIX=b \
+  MULLVAD_MOCK_LISTEN_SCRIPT="$LISTEN_SCRIPTS/drop.txt")"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/matrix-b.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "matrix-b: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "matrix-b: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" stepsTrace)" == "connected>error>disconnected" ]] \
+    && ok "matrix-b: observed connected -> error -> disconnected" \
+    || not_ok "matrix-b: observed connected -> error -> disconnected (got: $(field "$json" stepsTrace))"
+  [[ "$(steps_find "$json" error stateIcon)" == "error" ]] && ok "matrix-b: error step stateIcon=error" \
+    || not_ok "matrix-b: error step stateIcon=error"
+  [[ "$(steps_find "$json" error tunnelDropWarning)" == "true" ]] \
+    && ok "matrix-b: error step tunnelDropWarning=true" \
+    || not_ok "matrix-b: error step tunnelDropWarning=true"
+  [[ "$(steps_find "$json" error active)" == "true" ]] && ok "matrix-b: error step active=true (still in tunnel-error state)" \
+    || not_ok "matrix-b: error step active=true"
+  [[ "$(field "$json" finalState)" == "disconnected" ]] && ok "matrix-b: finalState=disconnected" \
+    || not_ok "matrix-b: finalState=disconnected (got: $(field "$json" finalState))"
+  [[ "$(field "$json" finalActive)" == "false" ]] && ok "matrix-b: finalActive=false" \
+    || not_ok "matrix-b: finalActive=false"
+  [[ "$(field "$json" finalStateIcon)" == "disconnected" ]] && ok "matrix-b: finalStateIcon=disconnected" \
+    || not_ok "matrix-b: finalStateIcon=disconnected"
+fi
+check_no_orphans "$mocklog" "matrix-b"
+
+echo
+echo "-- (c) lockdown block: connected -> disconnecting(block) -> blocked --"
+log="$(run_scenario matrix-c MULLVAD_MOCK_MODE=ok MULLVAD_PROBE_MATRIX=c \
+  MULLVAD_MOCK_LISTEN_SCRIPT="$LISTEN_SCRIPTS/lockdown.txt")"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/matrix-c.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "matrix-c: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "matrix-c: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" stepsTrace)" == "connected>disconnecting>blocked" ]] \
+    && ok "matrix-c: observed connected -> disconnecting -> blocked" \
+    || not_ok "matrix-c: observed connected -> disconnecting -> blocked (got: $(field "$json" stepsTrace))"
+  [[ "$(steps_find "$json" disconnecting disconnectingAction)" == "block" ]] \
+    && ok "matrix-c: disconnecting step disconnectingAction=block" \
+    || not_ok "matrix-c: disconnecting step disconnectingAction=block"
+  [[ "$(field "$json" finalState)" == "blocked" ]] && ok "matrix-c: finalState=blocked" \
+    || not_ok "matrix-c: finalState=blocked (got: $(field "$json" finalState))"
+  [[ "$(field "$json" finalActive)" == "true" ]] && ok "matrix-c: finalActive=true" \
+    || not_ok "matrix-c: finalActive=true"
+  [[ "$(field "$json" finalStateIcon)" == "warning" ]] && ok "matrix-c: finalStateIcon=warning" \
+    || not_ok "matrix-c: finalStateIcon=warning (got: $(field "$json" finalStateIcon))"
+  [[ "$(field "$json" finalStatusText)" == "Blocked" ]] && ok "matrix-c: finalStatusText=Blocked" \
+    || not_ok "matrix-c: finalStatusText=Blocked (got: $(field "$json" finalStatusText))"
+fi
+check_no_orphans "$mocklog" "matrix-c"
+
+echo
+echo "-- (d) daemon restart: listener dies, respawns, poll never claims stale connected --"
+log="$(run_scenario matrix-d MULLVAD_MOCK_MODE=ok MULLVAD_PROBE_MATRIX=d \
+  MULLVAD_MOCK_LISTEN_SCRIPT="$LISTEN_SCRIPTS/restart.txt" \
+  MULLVAD_MOCK_LISTENER_DIED_MARKER="$OUT_DIR/matrix-d.marker")"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/matrix-d.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "matrix-d: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "matrix-d: probe printed a PROBE_RESULT line"
+  [[ -z "$(field "$json" note)" ]] && ok "matrix-d: no harness timeout/note (listener respawned)" \
+    || not_ok "matrix-d: no harness timeout/note (got: $(field "$json" note))"
+  # The proof the plan asks for: a poll ran and applied "disconnected"
+  # DURING the outage -- recorded inside Service.qml itself (_statusHistory),
+  # not sampled externally, so it can't be missed by external poll timing.
+  [[ "$(field "$json" sawPollDisconnected)" == "true" ]] \
+    && ok "matrix-d: an intermediate status poll applied disconnected during the outage" \
+    || not_ok "matrix-d: an intermediate status poll applied disconnected during the outage"
+  [[ "$(field "$json" finalState)" == "connected" ]] \
+    && ok "matrix-d: listener respawned and state returned to connected" \
+    || not_ok "matrix-d: listener respawned and state returned to connected (got: $(field "$json" finalState))"
+fi
+check_no_orphans "$mocklog" "matrix-d"
+
+echo
+echo "-- (e) garbage lines: ignored (state unchanged), over-long line truncated --"
+log="$(run_scenario matrix-e MULLVAD_MOCK_MODE=ok MULLVAD_PROBE_MATRIX=e \
+  MULLVAD_MOCK_LISTEN_SCRIPT="$LISTEN_SCRIPTS/garbage.txt")"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/matrix-e.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "matrix-e: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "matrix-e: probe printed a PROBE_RESULT line"
+  [[ "$(steps_none "$json" state unknown)" == "true" ]] \
+    && ok "matrix-e: state never corrupted to \"unknown\" by a garbage line" \
+    || not_ok "matrix-e: state never corrupted to \"unknown\" by a garbage line"
+  [[ "$(steps_any "$json" lastError)" == "true" ]] \
+    && ok "matrix-e: lastError surfaced the parse failure" \
+    || not_ok "matrix-e: lastError surfaced the parse failure"
+  listenerLineChars="$(field "$json" lastListenerLineChars)"
+  found8192="$(node -e '
+    try {
+      const d = JSON.parse(process.argv[1]);
+      process.stdout.write((d.steps||[]).some(s=>s.lastListenerLineChars===8192)?"true":"false");
+    } catch(e){process.stdout.write("false")}
+  ' "$json")"
+  [[ "$found8192" == "true" ]] && ok "matrix-e: over-long line truncated to listenerLineChars (8192)" \
+    || not_ok "matrix-e: over-long line truncated to listenerLineChars (8192) (last observed: $listenerLineChars)"
+  [[ "$(field "$json" finalState)" == "connected" ]] \
+    && ok "matrix-e: the next valid line applied (finalState=connected)" \
+    || not_ok "matrix-e: the next valid line applied (got: $(field "$json" finalState))"
+fi
+check_no_orphans "$mocklog" "matrix-e"
+
+echo
+echo "-- poll vs. listener race: a monotonic seq must not let a stale poll win --"
+log="$(run_scenario matrix-race MULLVAD_MOCK_MODE=ok MULLVAD_PROBE_MATRIX=race \
+  MULLVAD_MOCK_LISTEN_SCRIPT="$LISTEN_SCRIPTS/race.txt" \
+  MULLVAD_MOCK_STATUS_DELAY_MS=1500 \
+  MULLVAD_MOCK_STATUS_DELAY_TRIGGER="$OUT_DIR/matrix-race.trigger")"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/matrix-race.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "matrix-race: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "matrix-race: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" stepsTrace)" == "disconnected>connected" ]] \
+    && ok "matrix-race: the stale poll never re-applied after the listener's connected (no third step)" \
+    || not_ok "matrix-race: the stale poll never re-applied after the listener's connected (got: $(field "$json" stepsTrace))"
+  [[ "$(field "$json" finalState)" == "connected" ]] && ok "matrix-race: finalState=connected (listener wins, not the older poll)" \
+    || not_ok "matrix-race: finalState=connected (got: $(field "$json" finalState))"
+  [[ "$(field "$json" finalConnected)" == "true" ]] && ok "matrix-race: finalConnected=true" \
+    || not_ok "matrix-race: finalConnected=true"
+fi
+check_no_orphans "$mocklog" "matrix-race"
+
+echo
 if [[ "$fail_count" -eq 0 ]]; then
   echo "test/probe/run: ALL CHECKS PASSED ($pass_count ok)"
 else
