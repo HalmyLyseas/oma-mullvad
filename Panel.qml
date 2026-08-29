@@ -771,6 +771,9 @@ Panel {
 
       BorderSurface {
         id: relayMap
+        // Hidden (not just greyed) until the CLI and daemon are usable: the
+        // install prompt above must be the only thing competing for attention.
+        visible: root.cliReady
         width: parent.width
         height: Math.round(width * 0.50)
         color: Util.alpha(root.foreground, 0.025)
@@ -789,7 +792,7 @@ Panel {
       }
 
       OmaDropdown {
-        visible: root.favoriteOptions().length > 1
+        visible: root.cliReady && root.favoriteOptions().length > 1
         width: parent.width
         label: "Quick select favourite"
         options: root.favoriteOptions()
@@ -811,7 +814,8 @@ Panel {
         triggerLabel: root.relayTargetLabel()
         options: root.locationOptions()
         value: root.constraintKey((service.relayConstraints || {}).location)
-        enabled: !service.busy
+        enabled: !service.busy && root.cliReady
+        opacity: root.cliReady ? 1 : 0.35
         foreground: root.foreground
         fontFamily: root.fontFamily
         onChanged: function(value) {
@@ -825,6 +829,10 @@ Panel {
 
       Column {
         visible: !service.loggedIn
+        // Greyed + inert until the CLI and daemon are usable (enabled on the
+        // Column propagates to the field and the Login button).
+        enabled: root.cliReady
+        opacity: root.cliReady ? 1 : 0.35
         width: parent.width
         spacing: Style.space(8)
 
@@ -1711,7 +1719,7 @@ Panel {
         wrapMode: Text.WordWrap
       }
 
-      RowLayout {
+      Row {
         width: parent.width
         spacing: Style.space(8)
 
