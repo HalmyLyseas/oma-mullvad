@@ -353,15 +353,24 @@ is required, not optional, after pulling this change in.
   `mullvad-update-check` / `install-mullvad` against `test/fixtures`/
   `test/mocks`), `test/cli-contract.mjs`, then `test/probe/run` (S10).
 - `test/probe/run` is the deterministic mock-CLI probe suite for
-  `Service.qml`'s Process rework (`23-s10-native-process-spec.md`):
-  `test/mocks/mullvad` shadows the real CLI on `PATH`
-  (`MULLVAD_MOCK_MODE=ok|hang|flood|fail`), `test/probe/service-probe.qml`
-  (`qs -n -p ...`) Loaders the real `Service.qml`, drains its read queue,
-  drives `login()`, and prints one JSON line the runner asserts against —
-  including that no mock process is ever left running once `qs` exits.
-  Skips itself (exit 0, with a notice) if no `qs`/Wayland session is
-  available, same convention as every other `qs`-dependent check here.
-  Never touches the real daemon.
+  `Service.qml`'s Process rework (`23-s10-native-process-spec.md`, extended
+  by N6 in `25-fable-review-s10.md`): `test/mocks/mullvad` shadows the real
+  CLI on `PATH` (`MULLVAD_MOCK_MODE=ok|fail|hang|flood|action-hang`),
+  `test/mocks/checkupdates` separately shadows `checkupdates` for the
+  update-check scenarios (`MOCK_MODE=none|updates|offline|hang`).
+  `test/probe/service-probe.qml` (`qs -n -p ...`) Loaders the real
+  `Service.qml`, drains its read queue, then drives one of a few scenarios
+  selected by env vars (plain `login()`; `MULLVAD_PROBE_DOUBLE_LOGIN=1` —
+  connect then login twice, proving stdin reuse across actions;
+  `MULLVAD_PROBE_ACTION_ONLY=1` — connect only, for the action-watchdog
+  scenario; `MULLVAD_PROBE_CHECK_UPDATES=1` — also drives
+  `checkForUpdates()`), and prints one JSON line the runner asserts
+  against — including that no mock process (from either mock) is ever left
+  running once `qs` exits. `PACMAN_LOCAL_DIR` points at the fixture pacman
+  tree so the `packageInfo` read never touches this box's real installed-
+  package database either. Skips itself (exit 0, with a notice) if no
+  `qs`/Wayland session is available, same convention as every other
+  `qs`-dependent check here. Never touches the real daemon.
 - `test/cli-contract.mjs` runs the real local `mullvad` CLI with read-only
   subcommands only (`--version`, `status --json`, `relay list/get`,
   `auto-connect get`, `lan get`, `lockdown-mode get`, `dns get`,
