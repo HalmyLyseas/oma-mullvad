@@ -299,7 +299,8 @@ Item {
                   root.selectionChanged(selected)
                   return
                 }
-                root.value = v
+                // Emit only -- see OmaDropdown.qml: assigning root.value here
+                // would destroy the caller's `value:` binding.
                 root.changed(v)
                 popup.close()
               }

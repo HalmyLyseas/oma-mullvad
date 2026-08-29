@@ -284,8 +284,13 @@ Item {
     _enqueueRead("packageInfo", [packageInfoScript])
   }
 
+  // 27b F2: while the daemon is reported down, go through the full probe
+  // path instead of the cheap status poll -- otherwise a CLI uninstalled
+  // mid-session keeps being misreported as "daemon unavailable" (with the
+  // wrong recovery button) until the user refreshes by hand. Healthy state
+  // (installed && daemonRunning) keeps the cheap status + pid poll.
   function refreshStatus() {
-    if (installed) {
+    if (installed && daemonRunning) {
       _enqueueRead("status", ["mullvad", "status", "--json"])
       // T2: cheap (local pgrep), read alongside every routine status poll.
       _enqueueRead("daemonPid", ["pgrep", "-x", "mullvad-daemon"])

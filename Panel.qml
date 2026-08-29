@@ -736,7 +736,7 @@ Panel {
           }
 
           Button {
-            visible: !service.installed || !service.daemonRunning
+            visible: service.state !== "checking" && (!service.installed || !service.daemonRunning)
             text: root.installActionLabel()
             bordered: true
             focusable: true
@@ -746,7 +746,7 @@ Panel {
 
           Text {
             textFormat: Text.PlainText
-            visible: !service.installed || !service.daemonRunning
+            visible: service.state !== "checking" && (!service.installed || !service.daemonRunning)
             width: parent.width
             text: "After the terminal finishes, this panel refreshes by itself."
             color: root.dim

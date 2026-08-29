@@ -206,7 +206,11 @@ Item {
           function selectCurrent() {
             if (currentIndex < 0 || currentIndex >= root.options.length) return
             var v = root.optionValue(root.options[currentIndex])
-            root.value = v
+            // Never assign root.value here: an imperative write would destroy
+            // the binding the caller installed (`value: <model state>`), so
+            // a failed/timed-out backend action would leave the ATTEMPTED
+            // value on screen instead of the real one. Emit only; the
+            // caller's binding reflects the new value once its model does.
             root.changed(v)
             popup.close()
           }
