@@ -38,7 +38,7 @@ jobs:
           # the real binary); jq is what usr/share/omarchy/bin/
           # omarchy-plugin-validate itself needs (checked against the
           # installed script's own dependencies at authoring time).
-          pacman -Syu --noconfirm quickshell cage nodejs procps-ng pacman-contrib jq jq
+          pacman -Syu --noconfirm quickshell cage nodejs procps-ng pacman-contrib jq
 
       - name: Extract the Omarchy shell QML tree and plugin-validate script
         run: |
