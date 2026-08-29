@@ -372,6 +372,42 @@ function addRecent(values, location) {
     return result;
 }
 
+// Excluded tab: desktop ids of apps launched outside the tunnel from this
+// panel, most recent first, capped at 10. Omarchy exposes no recently-used
+// apps source of its own, so the plugin keeps this list in its settings.
+var MAX_RECENT_APPS = 10;
+
+function validateDesktopId(value) {
+    var id = text(value);
+    return id.length > 0 && id.length <= 256
+        && /^[a-z0-9][a-z0-9_.+\-]*$/i.test(id) && !/(^|\.)\.\.?(\.|$)/.test(id);
+}
+
+function normalizeRecentApps(values) {
+    var result = [];
+    var seen = {};
+    values = Array.isArray(values) ? values : [];
+    for (var i = 0; i < values.length && result.length < MAX_RECENT_APPS; ++i) {
+        var id = text(values[i]).trim();
+        if (id.slice(-8) === ".desktop")
+            id = id.slice(0, -8);
+        if (!validateDesktopId(id) || seen[id])
+            continue;
+        seen[id] = true;
+        result.push(id);
+    }
+    return result;
+}
+
+function addRecentApp(values, desktopId) {
+    var id = text(desktopId).trim();
+    if (id.slice(-8) === ".desktop")
+        id = id.slice(0, -8);
+    if (!validateDesktopId(id))
+        return normalizeRecentApps(values);
+    return normalizeRecentApps([id].concat(normalizeRecentApps(values)));
+}
+
 function emptyConstraint() {
     return { type: "any", countryCode: "", cityCode: "", hostname: "" };
 }
@@ -882,6 +918,9 @@ var api = {
     findFavoriteIndex: findFavoriteIndex,
     cycleFavorite: cycleFavorite,
     addRecent: addRecent,
+    normalizeRecentApps: normalizeRecentApps,
+    addRecentApp: addRecentApp,
+    validateDesktopId: validateDesktopId,
     parseRelayConstraints: parseRelayConstraints,
     parseAccount: parseAccount,
     parseToggle: parseToggle,

@@ -30,6 +30,9 @@ Panel {
   property var selectedLocation: null
   property var favoriteLocations: []
   property var recentLocations: []
+  // Excluded tab default list (desktop ids, most recent first, <= 10); the
+  // full app library is only consulted while a search query is typed.
+  property var recentExcludedApps: []
   property var pendingConfirmation: null
   property bool syncingSettings: false
   // T2: reused github-status idea -- relative-time labels on the System tab
@@ -88,15 +91,22 @@ Panel {
     return false
   }
 
-  function persistCollections(favorites, recents) {
+  function persistCollections(favorites, recents, recentApps) {
     favoriteLocations = Model.normalizeFavorites(arrayFrom(favorites))
     recentLocations = Model.normalizeFavorites(arrayFrom(recents)).slice(0, 5)
+    recentExcludedApps = Model.normalizeRecentApps(arrayFrom(recentApps === undefined ? recentExcludedApps : recentApps))
     if (!bar || !bar.shell || typeof bar.shell.updateEntryInline !== "function") return
     var entry = { id: moduleName }
     for (var key in settings) if (key !== "id") entry[key] = settings[key]
     entry.favoriteLocations = favoriteLocations
     entry.recentLocations = recentLocations
+    entry.recentExcludedApps = recentExcludedApps
     bar.shell.updateEntryInline(moduleName, entry)
+  }
+
+  function recordRecentApp(desktopId) {
+    persistCollections(favoriteLocations, recentLocations,
+                       Model.addRecentApp(arrayFrom(recentExcludedApps), desktopId))
   }
 
   function toggleFavorite(location) {
@@ -315,14 +325,26 @@ Panel {
   property var _appRowsCache: []
   function invalidateAppRows() { _appRowsQuery = "\u0000" }
 
+  // Default (no query): the plugin's own recent list, resolved by id --
+  // O(10) lookups, no sort of the whole library, no dependency on a shell
+  // recents source (Omarchy has none). With a query: the library's fuzzy
+  // search, capped at 30.
   function appRows() {
     if (!bar || !bar.shell || !bar.shell.appLibrary) return []
     if (_appRowsQuery === appQuery) return _appRowsCache
-    var source = bar.shell.appLibrary.sortedEntries(appQuery)
     var result = []
-    for (var i = 0; i < source.length && result.length < 30; i++) {
-      var entry = source[i].entry || source[i]
-      if (entry && entry.id) result.push(entry)
+    if (String(appQuery || "").trim() === "") {
+      var ids = arrayFrom(recentExcludedApps)
+      for (var r = 0; r < ids.length && result.length < 10; r++) {
+        var found = DesktopEntries.byId(String(ids[r]))
+        if (found && found.id) result.push(found)
+      }
+    } else {
+      var source = bar.shell.appLibrary.sortedEntries(appQuery)
+      for (var i = 0; i < source.length && result.length < 30; i++) {
+        var entry = source[i].entry || source[i]
+        if (entry && entry.id) result.push(entry)
+      }
     }
     _appRowsCache = result
     _appRowsQuery = appQuery
@@ -430,6 +452,8 @@ Panel {
     syncingSettings = true
     favoriteLocations = Model.normalizeFavorites(arrayFrom(setting("favoriteLocations", [])))
     recentLocations = Model.normalizeFavorites(arrayFrom(setting("recentLocations", []))).slice(0, 5)
+    recentExcludedApps = Model.normalizeRecentApps(arrayFrom(setting("recentExcludedApps", [])))
+    invalidateAppRows()
     syncingSettings = false
   }
 
@@ -1565,13 +1589,13 @@ Panel {
       }
 
       PanelSeparator { foreground: root.foreground }
-      PanelSectionHeader { text: "LAUNCH AN APPLICATION"; foreground: root.foreground; fontFamily: root.fontFamily }
+      PanelSectionHeader { text: String(root.appQuery || "").trim() === "" ? "RECENT APPS" : "SEARCH RESULTS"; foreground: root.foreground; fontFamily: root.fontFamily }
 
       TextField {
         id: appSearch
         width: parent.width
         foreground: root.foreground
-        placeholderText: "Search installed applications"
+        placeholderText: "Search installed applications to launch outside the VPN"
         text: root.appQuery
         onTextChanged: root.appQuery = text
         Keys.onEscapePressed: {
@@ -1584,9 +1608,11 @@ Panel {
         textFormat: Text.PlainText
         visible: excludedColumn.apps.length === 0
         width: parent.width
-        text: root.bar && root.bar.shell && root.bar.shell.appLibrary
-          ? "No installed applications match your search."
-          : "The active bar host does not expose Omarchy’s application library."
+        text: !(root.bar && root.bar.shell && root.bar.shell.appLibrary)
+          ? "The active bar host does not expose Omarchy’s application library."
+          : String(root.appQuery || "").trim() === ""
+          ? "No recent apps yet. Search for an application to launch it outside the VPN; it will show up here next time."
+          : "No installed applications match your search."
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
@@ -1850,6 +1876,7 @@ Panel {
     function launchExcluded() {
       if (service.busy || !app || !app.id) return
       service.launchExcludedApp(String(app.id))
+      root.recordRecentApp(String(app.id))
       root.close()
     }
 

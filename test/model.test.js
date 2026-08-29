@@ -264,6 +264,19 @@ test("T2: relativeTimeMs renders a live-countable label or \"never\"", () => {
     assert.equal(Model.relativeTimeMs(now - 2 * 86400000, now), "2d ago");
 });
 
+test("recent excluded apps: validated desktop ids, most recent first, deduped, capped at 10", () => {
+    assert.deepEqual(Model.normalizeRecentApps(["org.mozilla.firefox.desktop", "bad id", "../x", "-flag", "org.mozilla.firefox", "code"]),
+        ["org.mozilla.firefox", "code"]);
+    let recents = [];
+    for (let i = 0; i < 12; i++) recents = Model.addRecentApp(recents, "app" + i);
+    assert.equal(recents.length, 10);
+    assert.equal(recents[0], "app11");
+    assert.deepEqual(Model.addRecentApp(["a", "b", "c"], "b"), ["b", "a", "c"]);
+    assert.deepEqual(Model.addRecentApp(["a"], "x; reboot"), ["a"]);
+    assert.equal(Model.validateDesktopId("org.telegram.desktop"), true);
+    assert.equal(Model.validateDesktopId(".hidden"), false);
+});
+
 test("trust-boundary validation accepts useful values and rejects malformed input", () => {
     assert.equal(Model.validatePort(53), true);
     assert.equal(Model.validatePort(0), false);
