@@ -27,6 +27,7 @@ git clone <this-repo> ~/.config/omarchy/plugins/halmylyseas.mullvad
 Then enable and load it:
 
 ```bash
+omarchy-shell shell rescanPlugins   # let the running shell notice the new folder
 omarchy plugin enable halmylyseas.mullvad --section right
 omarchy restart shell
 ```
