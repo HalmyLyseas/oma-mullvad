@@ -63,6 +63,7 @@ Item {
   })
   property var antiCensorship: ({ mode: "auto", port: "any" })
   property var excludedPids: []
+  property var excludedProcesses: []
 
   // System tab: binaries/daemon/updates state.
   property string cliVersion: ""
@@ -434,6 +435,11 @@ Item {
         }
       } else if (kind === "excludedPids") {
         excludedPids = Model.parseExcludedPids(raw)
+        var pidCsv = _excludedPidsCsv(excludedPids)
+        if (pidCsv) _enqueueRead("excludedProcs", ["ps", "-o", "pid=,ppid=,uunit=,comm=", "-p", pidCsv])
+        else excludedProcesses = []
+      } else if (kind === "excludedProcs") {
+        excludedProcesses = Model.parseProcessTable(raw)
       } else if (kind === "version") {
         var daemonInfo = Model.parseDaemonVersion(raw)
         daemonVersion = String(daemonInfo.version || "")
@@ -453,6 +459,17 @@ Item {
     listenerProcess.running = true
   }
 
+  // Builds the `ps -p` argument from validated integer PIDs only, never
+  // from the raw parsed command text.
+  function _excludedPidsCsv(procs) {
+    var pids = []
+    for (var i = 0; i < (procs || []).length && pids.length < 256; i++) {
+      var pid = Number(procs[i].pid)
+      if (pid >= 1 && pid <= 2147483647 && Math.floor(pid) === pid) pids.push(String(pid))
+    }
+    return pids.join(",")
+  }
+
   function _command(action, params) {
     if (!installed) {
       lastError = "Mullvad CLI not found. Use the install button below, or install the mullvad-vpn package and refresh."
@@ -467,21 +484,24 @@ Item {
     }
   }
 
-  function _enqueueAction(command, label) {
+  // opts.quiet: this action's own _actionFinalize skips refreshAll() when
+  // more actions are still queued behind it -- used to batch a multi-PID
+  // removal into one refresh instead of one per PID.
+  function _enqueueAction(command, label, opts) {
     if (!command || command.length === 0) return false
-    _actionQueue = _actionQueue.concat([{ command: command, label: label }])
+    _actionQueue = _actionQueue.concat([{ command: command, label: label, quiet: !!(opts && opts.quiet) }])
     _startNextAction()
     return true
   }
 
-  function _runAction(action, params, label) {
-    return _enqueueAction(_command(action, params), label)
+  function _runAction(action, params, label, opts) {
+    return _enqueueAction(_command(action, params), label, opts)
   }
 
   // Shared by _startNextAction() and login() (which bypasses the queue).
   // stdinEnabled is reset true here, at arm time -- onStarted always closes
   // it after use, so a later action's write() would otherwise land nowhere.
-  function _armAction(command, label, secret) {
+  function _armAction(command, label, secret, quiet) {
     // Stop the "clear actionStatus" timer before arming the next label --
     // otherwise a timer from the PREVIOUS action's completion can still
     // fire later and blank actionStatus out from under a busy queue.
@@ -492,6 +512,7 @@ Item {
     actionWatchdog.restart()
     actionProcess.label = label
     actionProcess.secret = secret || ""
+    actionProcess.quiet = !!quiet
     actionProcess.command = command
     actionStatus = label + "…"
     actionProcess.stdinEnabled = true
@@ -503,7 +524,7 @@ Item {
     var queue = _actionQueue.slice(0)
     var action = queue.shift()
     _actionQueue = queue
-    _armAction(action.command, action.label, "")
+    _armAction(action.command, action.label, "", action.quiet)
   }
 
   function connectTunnel() {
@@ -639,11 +660,26 @@ Item {
     Quickshell.execDetached(command)
     actionStatus = "Launched outside the VPN"
     actionStatusTimer.restart()
+    // A launched app's helper processes (crashpad, GPU process) can spawn
+    // after mullvad-exclude's own PID appears, so refresh twice.
     excludedRefresh.restart()
+    excludedRefresh4s.restart()
   }
 
-  function removeExcludedPid(pid) {
-    _runAction("excludedPidDelete", { pid: pid }, "Removing excluded process")
+  function refreshExcluded() {
+    _enqueueRead("excludedPids", ["mullvad", "split-tunnel", "list"])
+  }
+
+  // One "split-tunnel delete" per validated PID; only the last one refreshes.
+  function removeExcludedPids(pids) {
+    var list = []
+    var input = Array.isArray(pids) ? pids : []
+    for (var i = 0; i < input.length && list.length < 256; i++) {
+      var pid = Number(input[i])
+      if (pid >= 1 && pid <= 2147483647 && Math.floor(pid) === pid) list.push(pid)
+    }
+    for (var j = 0; j < list.length; j++)
+      _runAction("excludedPidDelete", { pid: list[j] }, "Removing excluded process", { quiet: j < list.length - 1 })
   }
 
   // The network update check runs on its own Process, never the shared
@@ -704,7 +740,14 @@ Item {
     id: excludedRefresh
     interval: 1000
     repeat: false
-    onTriggered: root._enqueueRead("excludedPids", ["mullvad", "split-tunnel", "list"])
+    onTriggered: root.refreshExcluded()
+  }
+
+  Timer {
+    id: excludedRefresh4s
+    interval: 4000
+    repeat: false
+    onTriggered: root.refreshExcluded()
   }
 
   // At most once an hour, imperative interval like pollTimer. First run at
@@ -867,6 +910,7 @@ Item {
     id: actionProcess
     property string label: ""
     property string secret: ""
+    property bool quiet: false
     command: []
     running: false
     stdinEnabled: true
@@ -917,6 +961,8 @@ Item {
     actionKillTimer.stop()
     actionProcess.secret = "" // redundant with onRunningChanged above, belt-and-suspenders.
     var label = actionProcess.label
+    var quiet = actionProcess.quiet
+    actionProcess.quiet = false
     var success = false
     if (syntheticError) {
       root.lastError = root._shortError(syntheticError, label + " failed")
@@ -946,7 +992,9 @@ Item {
         success = true
       }
     }
-    root.refreshAll()
+    // A quiet action with more still queued behind it skips refreshAll --
+    // only the last of a batch (e.g. a multi-PID removal) triggers one.
+    if (!(quiet && root._actionQueue.length > 0)) root.refreshAll()
     if (success) Qt.callLater(root._startNextAction)
   }
 
