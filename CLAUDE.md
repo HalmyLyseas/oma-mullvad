@@ -52,6 +52,21 @@ panel `Loader` is gated on the service existing: `docs/developers.md`.
    `mullvad connect|disconnect|reconnect|... set|account login|logout|
    split-tunnel delete` from a dev/test session outside a human-approved
    live-test pass. `test/cli-contract.mjs` is deliberately read-only.
+7. **Every `mullvad` call is a direct Quickshell `Process` child; never a
+   shell wrapper.** S10 (`23-s10-native-process-spec.md`) removed
+   `scripts/bounded-command` from the CLI path for exactly this reason: a
+   wrapper is a grandchild relationship as far as Quickshell's process
+   tree is concerned, and both real bugs this project has had (the
+   orphaned `status --json listen` listener, `06-verdict.md` D2; the empty
+   stdin on `account login`, `22-login-stdin-bug.md`) were bash-semantics
+   bugs in that wrapper, not in this plugin's own argv/redaction logic.
+   Deadlines and output caps are enforced in QML instead — see
+   `docs/developers.md` "Process contract" for the exact mechanism
+   (per-process watchdog `Timer`s, `signal(15)` then `signal(9)`, the
+   shared `_appendBoundedOutput` cap-and-kill helper). `scripts/` may still
+   contain non-CLI helper scripts (`install-mullvad`,
+   `mullvad-package-info`, `mullvad-update-check` — none of them spawn
+   `mullvad` itself), each still a direct `Process` child in its own right.
 
 ## Working agreement
 

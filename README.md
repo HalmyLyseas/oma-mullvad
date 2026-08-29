@@ -76,9 +76,14 @@ bash test/all
 omarchy plugin validate .
 ```
 
-`test/all` runs the Node unit tests (`Model.js`, the `bounded-command`
-guard, a QML Text-sink audit) and then `test/cli-contract.mjs`, which is
-read-only against the real Mullvad CLI.
+`test/all` runs the Node unit tests (`Model.js`, a QML Text-sink audit),
+the packaged-scripts suite, `test/cli-contract.mjs` (read-only against the
+real Mullvad CLI), and `test/probe/run` — a deterministic mock-CLI probe
+suite (`ok`/`hang`/`flood`/`fail` modes) that exercises `Service.qml`'s
+Process pipeline end to end against a shadowed `mullvad` binary, never the
+real daemon. See `docs/developers.md` "Process contract" for what every
+`mullvad` invocation actually is: a direct Quickshell `Process` child, no
+shell wrapper anywhere on the CLI path.
 
 ## Credits
 

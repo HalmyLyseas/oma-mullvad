@@ -20,7 +20,9 @@ split as `halmylyseas.github-status` and `halmylyseas.ristretto`:
 | `Model.js` | Pure ES5 logic: CLI-output parsers, the mutating-command argv allowlist, redaction, field/list caps. Plain Node can `require()` it (`test/model.test.js`). |
 | `OmaDropdown.qml` / `OmaSearchableDropdown.qml` | Shared dropdown widgets ("Oma" = Omarchy, kept from upstream naming — not a rebrand miss). |
 | `ThemeIcon.qml`, `WorldMap.qml` | Icon theming and the relay world map. |
-| `scripts/bounded-command` | `bash`, wraps *finite* CLI reads/actions with a hard deadline + output-line/byte cap so a stuck or verbose child can't hang the panel or flood memory. No longer used for the listener process — see "Why the listener runs unwrapped" below. |
+
+As of S10 (below), there is no wrapper script on the CLI path at all — see
+"Process contract".
 
 ### Injection contract (`BarWidget.injectPanel()`)
 
@@ -103,6 +105,102 @@ the service ignorant of "which bar widget instance" concept entirely, which
 matters once it is a true machine-wide singleton with potentially more than
 one caller.
 
+## Process contract (S10)
+
+As of `23-s10-native-process-spec.md`, **every `mullvad` invocation is a
+direct Quickshell `Process` child** — no shell wrapper anywhere on the CLI
+path. This section is the reference for what that means and why; "Why the
+listener runs unwrapped" below is now historical context for the same
+mechanism (it started with the listener alone, in the S6 fix pass).
+
+Four `Process` objects, one contract each (`Service.qml`):
+
+| Process | Command | Deadline | Caps | stdin |
+|---|---|---|---|---|
+| `readProcess` (queue) | `Model.argv(...)` read verbs, direct | `readTimeoutMs` (default 10 s), one watchdog per queued read | per-line slice + total lines (4096) / chars (262144); breach stops appending, signals the child, marks the read `overflowed` (treated as a failure) | none |
+| `actionProcess` (queue) | `Model.argv(...)` mutating verbs, direct | `actionTimeoutMs` (default 20 s) | same caps | `account login` only: `onStarted` → `write(number + "\n")`, clear the secret, then `stdinEnabled = false` (EOF). Every other action closes stdin the same way even though it never writes — nothing here reads further stdin once started. |
+| `listenerProcess` | `["mullvad","status","--json","listen"]`, unchanged since S6 | none (long-lived) | per-line slice only (`listenerLineChars`) | none |
+| `updateCheckProcess` | `[updateCheckScript]` — `scripts/mullvad-update-check` stays a bash script (it wraps `checkupdates`, not the Mullvad CLI) spawned as a direct `Process`, same as before S10 | `updateCheckTimeoutMs` (130 s) | same caps | none |
+
+**Watchdog pattern**, one `Timer` per process (`readWatchdog`/`actionWatchdog`/
+`updateCheckWatchdog`), modeled on `halmylyseas.github-status`'s
+`probeWatchdog`/`probeWatchdogFired`: on arm, `watchdog.interval = ms;
+watchdog.restart()` (interval assigned imperatively at arm time, never a
+live binding — Timer gotcha, recurs in every Omarchy plugin that's shipped
+one). On the process's own `exited`, `watchdog.stop()`. On the watchdog
+firing: set a one-shot `_<kind>WatchdogFired` flag (consumed and reset by
+the next `onExited`) and a persistent `_<kind>WatchdogFiredCount` (a debug
+counter `test/probe/service-probe.qml` reads), send `signal(15)`, then arm
+a 1s `killTimer` that sends `signal(9)` if the child is still alive.
+`running = false` alone would **not** escalate anything here — it only
+sends SIGTERM again (measured, see below) — so the killTimer calls
+`signal(9)` explicitly. Same-tick guards read `Process.running` directly,
+never a derived `readonly property bool` (a computed bool's re-evaluation
+inside the same JS tick that flipped its inputs isn't guaranteed).
+
+**Exit handling**: `onExited: function(exitCode, exitStatus)` —
+`exitStatus === 1` (`CrashExit`, i.e. killed by signal) is folded into a
+nonzero effective exit code regardless of `exitCode`, so a signalled child
+can never look like a clean success to any of the per-kind parsing
+branches in `_applyRead`/the action `onExited` (all of which already key
+off "exit code nonzero = failure").
+
+**Output caps**: `_appendReadOutput`/`_appendActionOutput`/
+`_appendUpdateCheckOutput` are thin per-kind wrappers around one shared
+`_appendBoundedOutput` helper. On breach, the line is capped so the
+running total lands **at** `finiteOutputChars`, never one char past it (a
+pre-existing +1 rounding in the old per-function implementations is fixed
+here), the matching process is sent `signal(15)` immediately — it does not
+keep running just because the QML side stopped reading its output — and
+an overflow counter increments for the probe suite.
+
+### Measured facts (Quickshell 0.3.1; PM probe, `scratchpad/pm-native/probe/shell.qml`)
+
+- `Process.running = false` sends **SIGTERM** to the direct child (a
+  trapping child saw TERM and exited `143`/`NormalExit`). `Process.signal(15)`
+  behaves the same; `signal(9)` is the hard kill (`SIGKILL` — this is why
+  the killTimer above calls it explicitly rather than relying on
+  `running = false` a second time).
+- `Process.write(str)` then `stdinEnabled = false` **closes stdin (EOF)**:
+  a child's `read -r` got the full line, a following `cat | wc -c` got 0
+  bytes. This is the exact mechanism `login()` now relies on, and the
+  reason `exchange/22-login-stdin-bug.md`'s bash-backgrounding bug (a
+  backgrounded `&` command gets `/dev/null` as stdin when job control is
+  off — every non-interactive script) cannot recur: there is no
+  backgrounded shell job anymore for that bug to hide in.
+- `SplitParser` delivers a trailing partial line (no newline) on exit —
+  relevant to why `_applyRead`/the action handlers always join whatever
+  lines arrived rather than assuming a clean final newline.
+- Quickshell's graceful `quickshell kill` IPC (what `omarchy restart shell`
+  uses) kills only its own direct children — confirmed again live for this
+  rework via `test/probe/run`: every mock PID for every mode, including the
+  long-lived `status --json listen` mock, was gone after the probe's
+  `Qt.quit()`, with **zero** orphans across 4 run modes. Grandchildren are
+  **not** signalled (a wrapped child's own children survive a wrapper's
+  death) — irrelevant now that no process here is ever wrapped, but it
+  remains the invariant this whole design depends on: never reintroduce a
+  shell wrapper on the CLI path.
+
+### A caveat this rework makes broader, not smaller
+
+`SplitParser`'s only property is `splitMarker` (the newline) — it cannot
+call `onRead` until a full line arrives, so an adversarial child that wrote
+an unbounded stream with **no newline** would have its entire output
+buffered by Quickshell itself before this plugin's own caps ever see a
+byte. Before S10 this was flagged as a listener-only accepted risk (see
+"Why the listener runs unwrapped" below); it now applies to
+`readProcess`/`actionProcess`/`updateCheckProcess` too, since none of them
+route through a byte-capping shell pipe (`head -c`) anymore either.
+Verified live in `test/probe/run`'s flood mode: the mock writes 10 MiB with
+no newline then one trailing newline, `SplitParser` buffers the whole
+thing internally and delivers it as one (huge) `onRead` call, at which
+point `_appendBoundedOutput` correctly caps the *stored* text at
+`finiteOutputChars` and kills the process — but Quickshell's own internal
+buffer held the full 10 MiB transiently first. Accepted for the same
+reason as before: the source is the local, root-installed `mullvad` CLI,
+not untrusted/remote input, and every real line it emits (JSON status
+objects, human-readable settings) is a few hundred bytes at most.
+
 ## Why the listener runs unwrapped (D2 story)
 
 Through S5, `Service.qml`'s `status --json listen` watcher ran through
@@ -136,10 +234,15 @@ Quickshell's kill now reaches the actual `mullvad` process directly. The
 per-line size cap the wrapper's `listen` mode used to enforce is applied in
 QML instead (`listenerLineChars`, sliced in both `stdout`/`stderr`
 `SplitParser.onRead` handlers) — unchanged behaviour, just enforced one
-layer up. `scripts/bounded-command`'s `listen` mode itself was deleted
-(kept only `finite`/`finite-run`, still used for every bounded read/action
-process); `test/bounded-command.test.js` was updated to assert the wrapper
-now rejects `listen` outright.
+layer up. `scripts/bounded-command`'s `listen` mode itself was deleted at
+the time (kept `finite`/`finite-run` for every other, still-wrapped
+read/action process); **S10 later removed the wrapper script itself
+entirely** — see "Process contract" above — once the same
+watchdog-plus-QML-caps approach was extended to `readProcess`/
+`actionProcess`/`updateCheckProcess` too. `test/bounded-command.test.js`
+(which asserted the wrapper rejected `listen`) is gone with it; its one
+test that was never about the wrapper (the QML Text-sink audit) lives on
+at `test/qml-sinks.test.js`.
 
 **Residual risk, by design, documented rather than "fixed":** this only
 covers the graceful `quickshell kill` IPC path (what `omarchy restart shell`
@@ -151,21 +254,22 @@ next write hits `EPIPE` and the `mullvad` CLI exits on its own.
 
 ## Accepted risks / known couplings
 
-- **The direct-child listener has no pre-newline buffer cap (C2,
-  `12-fable-review.md`).** Since F2, `listenerProcess` is a direct
-  `Process` child with a plain `SplitParser` on `stdout`/`stderr` —
-  `SplitParser`'s only property is `splitMarker` (the newline), so if the
-  child ever wrote an unbounded stream with no newline, `SplitParser`
-  would buffer it in full before ever calling `onRead` (`listenerLineChars`
-  only trims each line **after** it's delivered — it can't cap a buffer
-  that never delivers). Unfixable in plain QML without reintroducing a
-  wrapper process, and a wrapper is exactly what caused D2 (see above) —
-  so this is accepted, not fixed. Accepted because: the source is the
-  local, root-installed `mullvad` CLI, not untrusted/remote input; and
-  `mullvad status --json listen` emits one JSON object per line, each a
-  few hundred bytes (confirmed against this box's live output). Every
-  *finite* read/action process (everything except the listener) stays
-  capped by `scripts/bounded-command`'s own line/byte limits regardless.
+- **No process has a pre-newline buffer cap (C2, `12-fable-review.md`;
+  broadened by S10 — see "A caveat this rework makes broader, not smaller"
+  above).** Originally flagged for `listenerProcess` alone (a direct
+  `Process` child even before S10, with a plain `SplitParser` on
+  `stdout`/`stderr` — `SplitParser`'s only property is `splitMarker`, the
+  newline, so an unbounded no-newline stream buffers in full before
+  `onRead` ever fires). S10 removed the wrapper that used to give
+  `readProcess`/`actionProcess`/`updateCheckProcess` a byte cap
+  independent of QML (`scripts/bounded-command`'s `head -c`), so the same
+  caveat now applies to those three too — `finiteOutputChars`/
+  `finiteOutputLines` still bound what this plugin *stores* and still kill
+  the process on breach, just not before Quickshell's own `SplitParser`
+  buffer has already held the full unterminated write. Accepted for the
+  same reason as before: the source is the local, root-installed `mullvad`
+  CLI, not untrusted/remote input, and every real line it emits is a few
+  hundred bytes at most (confirmed against this box's live output).
 - **One `IpcHandler` per monitor.** `Panel.qml` still owns the plugin's
   `IpcHandler` (it needs the widget's `favoriteLocations`/`recentLocations`,
   which are Panel-local state persisted via `updateEntryInline`), and one
@@ -211,9 +315,21 @@ is required, not optional, after pulling this change in.
 
 ## Testing
 
-- `bash test/all` — Node unit tests (`Model.js`, the `bounded-command`
-  guard, a QML Text-sink audit over every `.qml` file at the plugin root,
-  now 7 files including `BarWidget.qml`) then `test/cli-contract.mjs`.
+- `bash test/all` — Node unit tests (`Model.js`, a QML Text-sink audit over
+  every `.qml` file at the plugin root, now 7 files including
+  `BarWidget.qml`), the `scripts.test.sh` suite (`mullvad-package-info` /
+  `mullvad-update-check` / `install-mullvad` against `test/fixtures`/
+  `test/mocks`), `test/cli-contract.mjs`, then `test/probe/run` (S10).
+- `test/probe/run` is the deterministic mock-CLI probe suite for
+  `Service.qml`'s Process rework (`23-s10-native-process-spec.md`):
+  `test/mocks/mullvad` shadows the real CLI on `PATH`
+  (`MULLVAD_MOCK_MODE=ok|hang|flood|fail`), `test/probe/service-probe.qml`
+  (`qs -n -p ...`) Loaders the real `Service.qml`, drains its read queue,
+  drives `login()`, and prints one JSON line the runner asserts against —
+  including that no mock process is ever left running once `qs` exits.
+  Skips itself (exit 0, with a notice) if no `qs`/Wayland session is
+  available, same convention as every other `qs`-dependent check here.
+  Never touches the real daemon.
 - `test/cli-contract.mjs` runs the real local `mullvad` CLI with read-only
   subcommands only (`--version`, `status --json`, `relay list/get`,
   `auto-connect get`, `lan get`, `lockdown-mode get`, `dns get`,
