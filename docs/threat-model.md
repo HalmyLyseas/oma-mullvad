@@ -22,7 +22,7 @@ are enforced, and `docs/developers.md` for architecture detail.
 | Mullvad CLI stdout/stderr | `Model.js`'s bounded parsers (`MAX_INPUT_CHARS`/`MAX_LINE_CHARS`/etc. caps) and `redact()`/`plainText()` (account-number and secret redaction) before any value reaches a `Service.qml` property; every `Text{}` sink is `textFormat: Text.PlainText` (`CLAUDE.md` rule 3, enforced by `test/qml-sinks.test.js`), so a hostile relay/city name can never be interpreted as rich text. |
 | Persisted plugin settings (`shell.json`: favourites, recents, excluded apps) | `Model.js`'s `normalizeFavorites()`/`normalizeRecentApps()` — capped length (9 favourites, 5 recents, 10 apps), deduplicated by key, and every app id is passed through `validateDesktopId()` (fixed charset, no `.`/`..` path-traversal segment) before it is stored or rendered. |
 | App library → the setuid `mullvad-exclude` | `Model.js`'s `argv()` `"launchExcluded"` case re-validates the id (leading-`-` rejection plus the same charset/traversal check) before building a fixed argv, `["mullvad-exclude", "uwsm-app", "--", "gtk-launch", desktopId]`. `/usr/bin/mullvad-exclude` (shipped by `mullvad-vpn-daemon`) is **setuid root**; the plugin can only choose *which already-installed desktop entry* it launches outside the tunnel — it never assembles an arbitrary command line and has no visibility into, or control over, what the binary does once it execs (the network-namespace exclusion itself is entirely inside that binary, outside this plugin's process). |
-| Omarchy shell internals (`bar.shell.*`) | `serviceFor(id)`/`appLibrary`/`updateEntryInline()` are undocumented, unversioned surface (see `docs/developers.md`, "Accepted risks"); `BarWidget.qml` gates its `Panel.qml` `Loader` on the service existing, so a null/removed service degrades to "widget shows nothing," not a crash. |
+| Omarchy shell internals (`bar.shell.*`) | `serviceFor(id)`/`appLibrary` (read) and `updateEntryInline()` (the plugin's one write, replacing only its own `shell.json` entry with favourites/recents/excluded-app list) are undocumented, unversioned surface (see `docs/developers.md`, "Accepted risks"); `BarWidget.qml` gates its `Panel.qml` `Loader` on the service existing, so a null/removed service degrades to "widget shows nothing," not a crash. |
 | The installer and its confirm gate | `scripts/install-mullvad` is the plugin's one declared `privilege` capability (`CLAUDE.md` rule 4): launched only from a `ConfirmDialog`-gated button in `Panel.qml`, takes no arguments, and receives no data derived from the CLI or settings. |
 | The network update check | `scripts/mullvad-update-check` is a read-only `checkupdates` wrapper with capped output and a watchdog deadline, run hourly by `Service.qml`'s `checkForUpdates()`/timer; it contacts Arch mirrors, never Mullvad's own infrastructure, and never installs anything. |
 
@@ -37,8 +37,9 @@ are enforced, and `docs/developers.md` for architecture detail.
   human-confirmed installer, and the only setuid-binary path is the
   pre-validated launch-outside-tunnel case above — nothing else in the
   plugin invokes `sudo`/`systemctl`/a package manager (rule 4).
-- It cannot modify anything under `/usr/share/omarchy/` (rule 5) or
-  otherwise change Omarchy shell internals — only read/react to them.
+- It cannot modify anything under `/usr/share/omarchy/` (rule 5). Its one
+  write into Omarchy shell internals is its own `shell.json` entry, via
+  `bar.shell.updateEntryInline()`; everything else it only reads/reacts to.
 - The account number is stdin-only into `mullvad account login` (rule 2):
   never a CLI argument, never logged, never rendered, redacted at every
   ingestion point.

@@ -943,7 +943,7 @@ Panel {
         Text {
           textFormat: Text.PlainText
           width: parent.width
-          text: "Your account number is sent to mullvad account login over stdin and is never saved by Mullvad."
+          text: "Your account number is sent to mullvad account login over stdin and is never saved by this plugin."
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

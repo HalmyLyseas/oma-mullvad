@@ -8,7 +8,7 @@ clone. The README covers using it; `CLAUDE.md` carries the hard rules.
 | File | Role |
 |---|---|
 | `manifest.json` | Kinds `["service", "bar-widget"]`, `keepLoaded: true`. `entryPoints.service` is `Service.qml`, `entryPoints.barWidget` is `BarWidget.qml`. |
-| `Service.qml` | All state and the only place that spawns processes: the Mullvad CLI polling/action/listener processes, the account/relay/settings model. **Instantiated exactly once, machine-wide**, by `shell.ensureService()` the first time any bar widget or panel resolves it. One poller, one `status --json listen` listener, one action queue, regardless of monitor count. |
+| `Service.qml` | All state and the tracked Mullvad CLI Process pipeline: polling/action/listener processes, the account/relay/settings model. Also the site of one untracked, fire-and-forget spawn, `launchExcludedApp()`'s `Quickshell.execDetached()` (see "Process contract"); `Panel.qml`'s install-prompt `execDetached` is the only OTHER process-spawn site in the plugin. **Instantiated exactly once, machine-wide**, by `shell.ensureService()` the first time any bar widget or panel resolves it. One poller, one `status --json listen` listener, one action queue, regardless of monitor count. |
 | `BarWidget.qml` | The bar-slot entry point (one instance per monitor). Resolves the singleton via `shell.serviceFor("halmylyseas.mullvad")`, reactive to `shell._services` being reassigned on every service add. Owns the button + icon, and hosts `Panel.qml` through a `Loader`. |
 | `Panel.qml` | The popup: Overview, Locations, Advanced, Excluded Apps, System pages. Receives `bar`, `settings`, `anchorItem`, `hostWidget`, and `service` from `BarWidget.injectPanel()` — it never resolves the service itself. |
 | `Model.js` | Pure ES5 logic: CLI-output parsers, the mutating-command argv allowlist, redaction, field/list caps. Plain Node can `require()` it (`test/model.test.js`). |
@@ -277,15 +277,18 @@ file — a plain hot-reload will not pick it up.
 
 ## CI
 
-`.github/workflows/test.yml` runs the same suites (`node --test`,
+`.github/workflows/test.yml` runs qmllint (0 errors) and
+`omarchy-plugin-validate` first, then the same suites (`node --test`,
 `test/scripts.test.sh`, `test/cli-contract.mjs`) on `archlinux:latest`,
 then the two probe suites under `cage` with a headless wlroots backend.
 The `omarchy` package is never installed there — it pulls in the whole
-desktop — only its `/usr/share/omarchy/shell` subtree is extracted from
-the downloaded package. `test/ci-local` runs the identical steps on a dev
-box (`--no-cage` uses this session's own Wayland display instead). See
-`docs/threat-model.md` for why `.github/**` is exempt from the repo's own
-comment-hygiene scan.
+desktop — only its `/usr/share/omarchy/shell` and `usr/share/omarchy/bin`
+subtrees are extracted from the downloaded package (`-Swdd`, skipping
+dependency resolution so the extraction glob matches exactly one
+archive, not also `omarchy-settings`). `test/ci-local` runs the identical
+steps on a dev box (`--no-cage` uses this session's own Wayland display
+instead). See `docs/threat-model.md` for why `.github/**` is exempt from
+the repo's own comment-hygiene scan.
 
 ## Releasing
 

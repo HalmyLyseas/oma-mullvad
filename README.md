@@ -69,7 +69,7 @@ omarchy plugin remove halmylyseas.mullvad
 
 ## Privacy
 
-Account numbers are sent to `mullvad account login` over standard input and are never stored. This plugin stores only favourites and recent locations; Mullvad remains responsible for VPN settings. See [`docs/threat-model.md`](docs/threat-model.md) for the full threat model.
+Account numbers are sent to `mullvad account login` over standard input and are never stored. This plugin stores only favourites, recent locations, and recently launched excluded apps; Mullvad remains responsible for VPN settings. See [`docs/threat-model.md`](docs/threat-model.md) for the full threat model.
 
 ## Verify
 
