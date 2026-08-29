@@ -1,0 +1,228 @@
+#!/usr/bin/env bash
+# UI probe suite: runs test/probe/ui-probe.qml under `qs -n -p`, PATH
+# shadowed like test/probe/run, plus QML_IMPORT_PATH at a scratch `qs`
+# symlink so `import qs.Ui`/`qs.Commons` resolve. Skips without `qs`.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+OUT_DIR="$(mktemp -d)"
+trap 'rm -rf "$OUT_DIR"' EXIT
+
+fail_count=0
+pass_count=0
+ok() { pass_count=$((pass_count + 1)); echo "ok - $1"; }
+not_ok() { fail_count=$((fail_count + 1)); echo "NOT OK - $1"; }
+
+if ! command -v qs >/dev/null 2>&1; then
+  echo "test/probe/run-ui: no \`qs\` on PATH (no Wayland session?) -- skipping UI probe suite"
+  exit 0
+fi
+
+QMLROOT="$OUT_DIR/qmlroot"
+mkdir -p "$QMLROOT"
+ln -sfn /usr/share/omarchy/shell "$QMLROOT/qs"
+
+# run_scenario <label> <VAR=val>... -- runs the probe once with every
+# trailing VAR=val exported, MULLVAD_UI_SCENARIO=<label>.
+run_scenario() {
+  local label="$1"; shift
+  local log="$OUT_DIR/$label.log"
+  local mocklog="$OUT_DIR/$label.mock.log"
+  : > "$mocklog"
+  env MULLVAD_MOCK_LOG="$mocklog" \
+    MULLVAD_PLUGIN_DIR="$PLUGIN_DIR" \
+    MULLVAD_UI_SCENARIO="$label" \
+    QML_IMPORT_PATH="$QMLROOT" \
+    PACMAN_LOCAL_DIR="$PLUGIN_DIR/test/fixtures/pacman-local" \
+    PATH="$PLUGIN_DIR/test/mocks:$PATH" \
+    "$@" \
+    timeout 30 qs -n -p "$PLUGIN_DIR/test/probe/ui-probe.qml" > "$log" 2>&1
+  echo "$log"
+}
+
+json_line() { grep -o 'PROBE_RESULT .*' "$1" | tail -n1 | sed 's/^PROBE_RESULT //'; }
+
+field() {
+  # field <json> <key> -- deterministic single flat object, node available
+  # everywhere this repo's tests already require node.
+  node -e '
+    try {
+      const data = JSON.parse(process.argv[1]);
+      const v = data[process.argv[2]];
+      process.stdout.write(v === undefined || v === null ? "" : String(v));
+    } catch (e) { process.stdout.write(""); }
+  ' "$1" "$2"
+}
+
+# arrayField <json> <key> -- comma-joined array field, e.g. pageAvailable.
+arrayField() {
+  node -e '
+    try {
+      const data = JSON.parse(process.argv[1]);
+      const v = data[process.argv[2]];
+      process.stdout.write(Array.isArray(v) ? v.join(",") : "");
+    } catch (e) { process.stdout.write(""); }
+  ' "$1" "$2"
+}
+
+# Same orphan-kill convention as test/probe/run: any mock PID this run's
+# log recorded that is still alive after `qs` exited is a leaked process.
+check_no_orphans() {
+  local mocklog="$1" label="$2"
+  local pids leaked=0
+  pids="$(grep -oP '^PID=\K[0-9]+' "$mocklog" 2>/dev/null | sort -u)"
+  for pid in $pids; do
+    if kill -0 "$pid" 2>/dev/null; then
+      leaked=1
+      kill -TERM "$pid" 2>/dev/null || true
+      sleep 0.2
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+      echo "  orphan: PID $pid was still alive after qs exited (killed by test/probe/run-ui)"
+    fi
+  done
+  if [[ $leaked -eq 1 ]]; then
+    not_ok "$label: no orphaned mock process left behind"
+  else
+    ok "$label: no orphaned mock process left behind"
+  fi
+}
+
+# check_no_engine_errors <log> <label> -- a missing stub bar/shell surface
+# property/method throws a TypeError or ReferenceError; fail on either.
+check_no_engine_errors() {
+  local log="$1" label="$2"
+  local count
+  count="$(grep -c 'TypeError\|ReferenceError' "$log" 2>/dev/null)"
+  [[ "${count:-0}" -eq 0 ]] && ok "$label: 0 TypeError/ReferenceError in the log" \
+    || not_ok "$label: 0 TypeError/ReferenceError in the log (got $count)"
+}
+
+echo "== (1) locked: CLI absent (mock --version fails) =="
+log="$(run_scenario locked MULLVAD_MOCK_MODE=noversion)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/locked.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "locked: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "locked: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" installed)" == "false" ]] && ok "locked: installed=false" \
+    || not_ok "locked: installed=false (got: $json)"
+  [[ "$(field "$json" cliReady)" == "false" ]] && ok "locked: cliReady=false" \
+    || not_ok "locked: cliReady=false"
+  [[ "$(arrayField "$json" pageAvailable)" == "true,false,false,false,true" ]] \
+    && ok "locked: pages 1-3 locked, Overview/System available" \
+    || not_ok "locked: pages 1-3 locked, Overview/System available (got: $(arrayField "$json" pageAvailable))"
+  [[ "$(field "$json" installActionLabel)" == "Install Mullvad VPN" ]] \
+    && ok "locked: Overview shows the install action" \
+    || not_ok "locked: Overview shows the install action (got: $(field "$json" installActionLabel))"
+fi
+check_no_engine_errors "$log" "locked"
+check_no_orphans "$mocklog" "locked"
+
+echo
+echo "== (2) ready: CLI + daemon usable, all pages unlocked =="
+log="$(run_scenario ready MULLVAD_MOCK_MODE=ok)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/ready.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "ready: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "ready: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" installed)" == "true" ]] && ok "ready: installed=true" \
+    || not_ok "ready: installed=true (got: $json)"
+  [[ "$(field "$json" daemonRunning)" == "true" ]] && ok "ready: daemonRunning=true" \
+    || not_ok "ready: daemonRunning=true"
+  [[ "$(field "$json" cliReady)" == "true" ]] && ok "ready: cliReady=true" \
+    || not_ok "ready: cliReady=true"
+  [[ "$(arrayField "$json" pageAvailable)" == "true,true,true,true,true" ]] \
+    && ok "ready: all pages unlocked" \
+    || not_ok "ready: all pages unlocked (got: $(arrayField "$json" pageAvailable))"
+fi
+check_no_engine_errors "$log" "ready"
+check_no_orphans "$mocklog" "ready"
+
+echo
+echo "== (3) dropdown: Ownership value follows the model, self-heals after a failed set =="
+log="$(run_scenario dropdown MULLVAD_MOCK_MODE=ok)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/dropdown.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "dropdown: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "dropdown: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" beforeValue)" == "any" ]] && ok "dropdown: starts at the real value (any)" \
+    || not_ok "dropdown: starts at the real value (any) (got: $(field "$json" beforeValue))"
+  [[ "$(field "$json" afterDirectSetValue)" == "rented" ]] \
+    && ok "dropdown: follows a direct service.relayConstraints mutation live" \
+    || not_ok "dropdown: follows a direct service.relayConstraints mutation live (got: $(field "$json" afterDirectSetValue))"
+  [[ "$(field "$json" finalLastError)" == *"unhandled invocation: relay set ownership rented"* ]] \
+    && ok "dropdown: the simulated setOwnership failure surfaced (mock relay set exits 2)" \
+    || not_ok "dropdown: the simulated setOwnership failure surfaced (got: $(field "$json" finalLastError))"
+  [[ "$(field "$json" finalValue)" == "any" ]] \
+    && ok "dropdown: settles back to the model's real value, not the attempted \"rented\"" \
+    || not_ok "dropdown: settles back to the model's real value (got: $(field "$json" finalValue))"
+  [[ "$(field "$json" finalRelayConstraintsOwnership)" == "any" ]] \
+    && ok "dropdown: service.relayConstraints.ownership also corrected to any" \
+    || not_ok "dropdown: service.relayConstraints.ownership also corrected to any"
+fi
+check_no_engine_errors "$log" "dropdown"
+check_no_orphans "$mocklog" "dropdown"
+
+echo
+echo "== (4) excluded: groups render (Repeater count), appRows() memoized =="
+log="$(run_scenario excluded MULLVAD_MOCK_MODE=ok)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/excluded.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "excluded: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "excluded: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" excludedProcessesLength)" == "14" ]] && ok "excluded: excludedProcesses.length === 14" \
+    || not_ok "excluded: excludedProcesses.length === 14 (got: $(field "$json" excludedProcessesLength))"
+  [[ "$(field "$json" groupsLength)" == "1" ]] && ok "excluded: excludedGroups().length === 1" \
+    || not_ok "excluded: excludedGroups().length === 1 (got: $(field "$json" groupsLength))"
+  [[ "$(field "$json" repeaterFound)" == "true" ]] && ok "excluded: the groups Repeater was found in the rendered tree" \
+    || not_ok "excluded: the groups Repeater was found in the rendered tree"
+  [[ "$(field "$json" repeaterCount)" == "1" ]] && ok "excluded: Repeater.count === 1 (matches groupsLength)" \
+    || not_ok "excluded: Repeater.count === 1 (got: $(field "$json" repeaterCount))"
+  [[ "$(field "$json" appRowsMemoized)" == "true" ]] && ok "excluded: appRows() is memoized (same array reference)" \
+    || not_ok "excluded: appRows() is memoized (same array reference)"
+fi
+check_no_engine_errors "$log" "excluded"
+check_no_orphans "$mocklog" "excluded"
+
+echo
+echo "== (5) lifecycle: svc -> null -> new service, no TypeErrors =="
+log="$(run_scenario lifecycle MULLVAD_MOCK_MODE=ok)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/lifecycle.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "lifecycle: probe printed a PROBE_RESULT line"; cat "$log"
+else
+  ok "lifecycle: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" panel1WasNonNull)" == "true" ]] && ok "lifecycle: the first Panel instance existed" \
+    || not_ok "lifecycle: the first Panel instance existed"
+  [[ "$(field "$json" panelActive1)" == "true" ]] && ok "lifecycle: panelLoader was active while svc existed" \
+    || not_ok "lifecycle: panelLoader was active while svc existed"
+  [[ "$(field "$json" panelActiveAfterNull)" == "false" ]] && ok "lifecycle: panelLoader deactivated once svc went null" \
+    || not_ok "lifecycle: panelLoader deactivated once svc went null"
+  [[ "$(field "$json" panelStatusAfterNull)" == "0" ]] && ok "lifecycle: panelLoader.status === Loader.Null" \
+    || not_ok "lifecycle: panelLoader.status === Loader.Null (got: $(field "$json" panelStatusAfterNull))"
+  [[ "$(field "$json" panelItemAfterNullWasNull)" == "true" ]] && ok "lifecycle: panelLoader.item was null while svc was null" \
+    || not_ok "lifecycle: panelLoader.item was null while svc was null"
+  [[ "$(field "$json" panel2IsNonNull)" == "true" ]] && ok "lifecycle: a fresh Panel exists for the new service" \
+    || not_ok "lifecycle: a fresh Panel exists for the new service"
+  [[ "$(field "$json" panel2ServiceIsSvc2)" == "true" ]] && ok "lifecycle: the fresh Panel's service is the NEW instance" \
+    || not_ok "lifecycle: the fresh Panel's service is the NEW instance"
+fi
+check_no_engine_errors "$log" "lifecycle"
+check_no_orphans "$mocklog" "lifecycle"
+
+echo
+if [[ "$fail_count" -eq 0 ]]; then
+  echo "test/probe/run-ui: ALL CHECKS PASSED ($pass_count ok)"
+else
+  echo "test/probe/run-ui: $fail_count FAILURE(S), $pass_count ok"
+fi
+exit $(( fail_count > 0 ? 1 : 0 ))

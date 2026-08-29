@@ -68,6 +68,14 @@ if [[ "$MODE" == "action-hang" && "$*" == "connect" ]]; then
   exec sleep 600
 fi
 
+# noversion: the CLI itself fails its version probe, the one read every
+# refreshAll() starts with -- distinct from "removed" (binary absent) and
+# from "fail" (--version deliberately still works there).
+if [[ "$MODE" == "noversion" && "$*" == "--version" ]]; then
+  echo "mock noversion: mullvad --version" >&2
+  exit 1
+fi
+
 # --- account login: reads exactly one stdin line ----------------------------
 if [[ "${1:-}" == "account" && "${2:-}" == "login" ]]; then
   if [[ "$MODE" == "fail" ]]; then

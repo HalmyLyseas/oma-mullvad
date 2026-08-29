@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Runs every test suite in this repo: Node unit tests, the scripts.test.sh
 # suite against fixtures/mocks, the read-only Mullvad CLI contract check,
-# then test/probe/run's mock-CLI probe suite. Exits non-zero on any failure.
+# then test/probe/run and test/probe/run-ui. Exits non-zero on any failure.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -24,6 +24,11 @@ if [[ $? -ne 0 ]]; then overall=1; fi
 echo
 echo "== test/probe/run (deterministic mock-CLI probe suite, S10) =="
 bash "$SCRIPT_DIR/probe/run"
+if [[ $? -ne 0 ]]; then overall=1; fi
+
+echo
+echo "== test/probe/run-ui (Panel + BarWidget UI probe suite, S16) =="
+bash "$SCRIPT_DIR/probe/run-ui"
 if [[ $? -ne 0 ]]; then overall=1; fi
 
 echo
