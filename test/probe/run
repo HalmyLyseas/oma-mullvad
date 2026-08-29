@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # test/probe/run -- deterministic mock-CLI probe suite for the S10 Process
-# rework (exchange/23-s10-native-process-spec.md) and its N6 fix-pass
-# additions (exchange/25-fable-review-s10.md). Runs
+# rework (exchange/23-s10-native-process-spec.md), its N6 fix-pass additions
+# (exchange/25-fable-review-s10.md), and the S12 failed-start fix
+# (exchange/28-s12-failed-start-spec.md, "removed" scenario below). Runs
 # test/probe/service-probe.qml once per scenario via `qs -n -p ...` with
 # PATH shadowed so every `mullvad`/`checkupdates` invocation resolves to
 # test/mocks/-- NEVER the real daemon (no Wayland IPC to a running shell is
@@ -327,6 +328,81 @@ run_updatecheck none none
 run_updatecheck updates updates
 run_updatecheck offline offline
 run_updatecheck hang hang
+
+echo
+echo "== removed mode (S12: mullvad binary vanishes mid-run) =="
+
+# S12 (28-s12-failed-start-spec.md): a per-run temp PATH dir holding ONLY a
+# symlink `mullvad` -> test/mocks/mullvad, placed ahead of a filtered
+# fallback PATH -- deliberately NOT the usual "$PLUGIN_DIR/test/mocks:$PATH"
+# every other scenario uses. test/mocks/mullvad is the exact file the
+# symlink points at, so if test/mocks were also reachable afterwards,
+# deleting just the symlink would not actually make `mullvad` unresolvable
+# (PATH search continues into the next directory that still has it) --
+# measured live, scratchpad/s12/linktest2/: with test/mocks appended after
+# the temp dir, `command -v mullvad` still resolved post-removal; without
+# it, resolution genuinely failed (exit 127), which is what this scenario
+# needs. The fallback PATH is also stripped of whatever directory a REAL
+# system `mullvad` might resolve from first (house rule: never let a
+# dev/test session reach the real CLI, `CLAUDE.md` rule 6) -- on this box
+# `mullvad` is currently uninstalled so this is a no-op, but the guard
+# holds on any machine where it might not be.
+REMOVED_PATH_DIR="$OUT_DIR/removed-path"
+mkdir -p "$REMOVED_PATH_DIR"
+ln -sf "$PLUGIN_DIR/test/mocks/mullvad" "$REMOVED_PATH_DIR/mullvad"
+SAFE_FALLBACK_PATH="$PATH"
+if real_mullvad="$(command -v mullvad 2>/dev/null)"; then
+  real_mullvad_dir="$(dirname "$real_mullvad")"
+  SAFE_FALLBACK_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v -x "$real_mullvad_dir" | paste -sd: -)"
+fi
+
+log="$OUT_DIR/removed.log"
+mocklog="$OUT_DIR/removed.mock.log"
+: > "$mocklog"
+start_ts=$(date +%s)
+env MULLVAD_MOCK_LOG="$mocklog" \
+  MULLVAD_PLUGIN_DIR="$PLUGIN_DIR" \
+  PACMAN_LOCAL_DIR="$PLUGIN_DIR/test/fixtures/pacman-local" \
+  MULLVAD_MOCK_LINK="$REMOVED_PATH_DIR/mullvad" \
+  MULLVAD_MOCK_MODE=ok \
+  MULLVAD_PROBE_REMOVED=1 \
+  PATH="$REMOVED_PATH_DIR:$SAFE_FALLBACK_PATH" \
+  timeout 30 qs -n -p "$PLUGIN_DIR/test/probe/service-probe.qml" > "$log" 2>&1
+end_ts=$(date +%s)
+elapsed=$((end_ts - start_ts))
+json="$(json_line "$log")"
+if [[ -z "$json" ]]; then
+  not_ok "removed: probe printed a PROBE_RESULT line"
+  cat "$log"
+else
+  ok "removed: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" daemonRunning)" == "false" ]] && ok "removed: daemonRunning=false" \
+    || not_ok "removed: daemonRunning=false (got: $json)"
+  [[ "$(field "$json" installed)" == "false" ]] && ok "removed: installed=false" \
+    || not_ok "removed: installed=false (got: $(field "$json" installed))"
+  [[ "$(field "$json" state)" == "unavailable" ]] && ok "removed: state=unavailable" \
+    || not_ok "removed: state=unavailable (got: $(field "$json" state))"
+  [[ -n "$(field "$json" lastError)" ]] && ok "removed: lastError non-empty" \
+    || not_ok "removed: lastError non-empty"
+  # Proof this recovered via the new failed-start finalize path, not the
+  # 1.5s read watchdog (which would also eventually surface a failure, just
+  # on a slower, unrelated path this scenario isn't testing).
+  fired="$(field "$json" readWatchdogFiredCount)"
+  [[ "${fired:-1}" -eq 0 ]] && ok "removed: readWatchdogFiredCount === 0 (via failed-start path, not the watchdog) ($fired)" \
+    || not_ok "removed: readWatchdogFiredCount === 0 (got $fired)"
+  [[ "$elapsed" -lt 6 ]] && ok "removed: elapsed < 6s (${elapsed}s)" \
+    || not_ok "removed: elapsed < 6s (took ${elapsed}s)"
+  # Action variant (in the same run): connectTunnel() was called right
+  # after the removal, while `installed` was still stale-true, so it
+  # genuinely reached actionProcess's own failed-start path instead of
+  # bailing out early at _command()'s `!installed` guard.
+  actionStatus="$(field "$json" actionStatus)"
+  [[ "$actionStatus" != "Connecting…" ]] && ok "removed: actionStatus reads as a failure, not stuck at \"Connecting…\" (got: $actionStatus)" \
+    || not_ok "removed: actionStatus reads as a failure, not stuck at \"Connecting…\""
+  [[ "$(field "$json" busy)" == "false" ]] && ok "removed: busy=false" \
+    || not_ok "removed: busy=false (got: $(field "$json" busy))"
+fi
+check_no_orphans "$mocklog" "removed"
 
 echo
 if [[ "$fail_count" -eq 0 ]]; then

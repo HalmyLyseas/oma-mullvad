@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Io
 
 // test/probe/service-probe.qml -- deterministic mock-CLI probe for
 // Service.qml (exchange/23-s10-native-process-spec.md, extended by N6 in
@@ -36,6 +37,12 @@ ShellRoot {
   property bool doubleLogin: Quickshell.env("MULLVAD_PROBE_DOUBLE_LOGIN") === "1"
   property bool actionOnly: Quickshell.env("MULLVAD_PROBE_ACTION_ONLY") === "1"
   property bool checkUpdatesMode: Quickshell.env("MULLVAD_PROBE_CHECK_UPDATES") === "1"
+  // S12 (28-s12-failed-start-spec.md): the `mullvad` binary vanishes
+  // mid-run -- test/probe/run points MULLVAD_MOCK_LINK at a per-run temp
+  // symlink (`mullvad` -> test/mocks/mullvad) that resolves ahead of
+  // everything else on PATH; this scenario deletes just that symlink to
+  // simulate an uninstall, then drives Service.qml's own recovery path.
+  property bool removedScenario: Quickshell.env("MULLVAD_PROBE_REMOVED") === "1"
 
   Loader {
     id: loader
@@ -109,7 +116,10 @@ ShellRoot {
   // scenario (fail/hang/flood) keeps the original single-login shape.
   function afterReadsDrained() {
     elapsedMs = 0
-    if (actionOnly) {
+    if (removedScenario) {
+      removeLinkProcess.command = ["rm", "-f", Quickshell.env("MULLVAD_MOCK_LINK")]
+      removeLinkProcess.running = true
+    } else if (actionOnly) {
       service.connectTunnel()
       _drainThen(afterActions)
     } else if (doubleLogin) {
@@ -124,6 +134,37 @@ ShellRoot {
     } else {
       service.login("1234567890123456")
       _drainThen(afterActions)
+    }
+  }
+
+  // S12: removes the per-run temp symlink test/probe/run points `mullvad`
+  // at (see MULLVAD_MOCK_LINK above), waits for the `rm` itself to exit,
+  // then drives the action variant first -- `service.connectTunnel()`,
+  // while `installed` is still stale-true (no read has re-probed yet) --
+  // so it genuinely reaches actionProcess's own failed-start path (the
+  // bug's action-side symptom) rather than bailing out early at
+  // `_command()`'s `!installed` guard, which is what would happen if this
+  // ran after the read-side re-probe below has already flipped `installed`
+  // to false. Only then the read-side path: refreshStatus() while
+  // installed/daemonRunning are still stale-true (the "healthy" branch,
+  // enqueuing a direct `mullvad status --json` -- the read that actually
+  // hits the failed-start bug), drain, then refreshStatus() again (now
+  // daemonRunning is false, so this is "the probe path": refreshAll() ->
+  // `/usr/bin/env mullvad --version`, a NORMAL exit(127) via env itself,
+  // not a synthetic one -- this is what actually flips `installed` false).
+  Process {
+    id: removeLinkProcess
+    running: false
+    onExited: function() {
+      probeRoot.elapsedMs = 0
+      probeRoot.service.connectTunnel()
+      probeRoot._drainThen(function() {
+        probeRoot.service.refreshStatus()
+        probeRoot._drainThen(function() {
+          probeRoot.service.refreshStatus()
+          probeRoot._drainThen(probeRoot.afterActions)
+        })
+      })
     }
   }
 
@@ -171,6 +212,7 @@ ShellRoot {
       locationsLength: (service.locations || []).length,
       lastError: service.lastError,
       actionStatus: service.actionStatus,
+      busy: service.busy,
       hasDebugCounters: hasDebugCounters,
       readWatchdogFiredCount: debugProp("_readWatchdogFiredCount"),
       actionWatchdogFiredCount: debugProp("_actionWatchdogFiredCount"),

@@ -34,7 +34,16 @@
 # prove PATH shadowing actually took effect for this run (never assumed).
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# S12 (28-s12-failed-start-spec.md): resolved via `readlink -f`, not a plain
+# `dirname "${BASH_SOURCE[0]}"` -- the "removed" probe scenario invokes this
+# script through a symlink (a per-run temp dir's `mullvad` -> this file, so
+# the CLI can be made to vanish mid-run by deleting just the symlink).
+# BASH_SOURCE reflects the PATH used to invoke the script (the symlink's own
+# directory), not its resolved target, so the plain form silently pointed
+# FIXTURES at a nonexistent path under the temp dir (measured live,
+# scratchpad/s12/linktest/) -- `readlink -f` canonicalizes through the
+# symlink first.
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 FIXTURES="$SCRIPT_DIR/../fixtures/cli"
 MODE="${MULLVAD_MOCK_MODE:-ok}"
 
