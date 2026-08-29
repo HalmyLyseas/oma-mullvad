@@ -2,15 +2,18 @@
   "schemaVersion": 1,
   "id": "halmylyseas.mullvad",
   "name": "Mullvad",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "author": "HalmyLyseas",
   "license": "MIT",
   "description": "A theme-aware Mullvad VPN control and status widget for the Omarchy bar.",
   "kinds": [
+    "service",
     "bar-widget"
   ],
+  "keepLoaded": true,
   "entryPoints": {
-    "barWidget": "Panel.qml"
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
   },
   "barWidget": {
     "displayName": "Mullvad VPN",

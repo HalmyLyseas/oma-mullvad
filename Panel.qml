@@ -15,6 +15,15 @@ Panel {
   ipcTarget: moduleName
   manageIpc: false
 
+  // Handed over by BarWidget.injectPanel() -- this file is only ever
+  // instantiated once the singleton service exists (BarWidget's Loader is
+  // gated on `svc !== null`), so `service` below is never null in normal
+  // operation and every `service.` read in this file is intentionally
+  // left unguarded (F1, exchange/10-s6-fix-spec.md).
+  property var anchorItem: null
+  property var hostWidget: null
+  property var service: null
+
   property int pageIndex: 0
   property string locationQuery: ""
   property string appQuery: ""
@@ -29,24 +38,14 @@ Panel {
   readonly property color accent: Color.accent
   readonly property color dim: Qt.darker(foreground, 1.5)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
-  readonly property color stateColor: stateIcon === "error" || stateIcon === "warning" ? urgent
-    : service.connected ? foreground
-    : Qt.darker(foreground, 1.55)
-  readonly property string stateIcon: service.state === "checking" ? "connecting"
-    : !service.installed || (service.installed && !service.daemonRunning) || service.state === "error" ? "error"
-    : service.state === "blocked" ? "warning"
-    : service.tunnelDropWarning || (service.loggedIn && service.accountDaysRemaining >= 0 && service.accountDaysRemaining <= 7) ? "warning"
-    : service.transitional ? "connecting"
-    : service.connected ? "connected" : "disconnected"
+  // F1: stateIcon/stateColor computation moved to BarWidget.qml (it needs
+  // svc-guarded versions to paint before the service resolves). Panel still
+  // uses stateIcon in the hero, so it reads the host widget's already-
+  // computed value instead of duplicating the logic, with a null-guard
+  // fallback for the rare case this panel is probed standalone.
+  readonly property string stateIcon: hostWidget && hostWidget.stateIcon !== undefined ? hostWidget.stateIcon : "connecting"
+  readonly property color stateColor: hostWidget && hostWidget.stateColor !== undefined ? hostWidget.stateColor : foreground
   readonly property string tunnelHint: service.active ? "Disconnect Mullvad VPN" : "Connect Mullvad VPN"
-  readonly property string barTooltip: !service.installed ? "Mullvad CLI is not installed"
-    : !service.daemonRunning ? "Mullvad daemon is unavailable"
-    : stateIcon === "error" ? "Mullvad tunnel error"
-    : stateIcon === "warning" ? (service.state === "blocked" ? "Mullvad is blocking network traffic"
-      : service.tunnelDropWarning
-      ? "Mullvad tunnel dropped unexpectedly"
-      : "Mullvad account credit expires soon")
-    : tunnelHint
 
   function arrayFrom(value) {
     if (!value || typeof value === "string" || typeof value.length !== "number") return []
@@ -338,9 +337,6 @@ Panel {
     syncingSettings = false
   }
 
-  implicitWidth: button.implicitWidth
-  implicitHeight: button.implicitHeight
-
   onSettingsChanged: syncInlineSettings()
   onOpenedChanged: if (opened) {
     pageFlick.contentY = 0
@@ -349,11 +345,6 @@ Panel {
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
   Component.onCompleted: syncInlineSettings()
-
-  Service {
-    id: service
-    pollInterval: Math.max(5000, Math.min(3600000, (Number(root.setting("refreshIntervalSec", 30)) || 30) * 1000))
-  }
 
   IpcHandler {
     target: root.ipcTarget
@@ -372,33 +363,10 @@ Panel {
     function favorite(index: string): string { return root.chooseFavorite(index) }
   }
 
-  BarIconButton {
-    id: button
-    anchors.fill: parent
-    bar: root.bar
-    tooltipText: root.barTooltip
-    iconComponent: Component {
-      Item {
-        ThemeIcon {
-          anchors.centerIn: parent
-          iconSize: Style.bar.iconCanvas
-          state: root.stateIcon
-          color: service.connected ? root.barForeground : Qt.darker(root.barForeground, 1.5)
-          urgentColor: root.bar ? root.bar.urgent : Color.urgent
-        }
-      }
-    }
-    onPressed: function(buttonCode) {
-      if (buttonCode === Qt.RightButton) service.toggleTunnel()
-      else if (buttonCode === Qt.MiddleButton) service.refreshAll()
-      else root.toggle()
-    }
-  }
-
   KeyboardPanel {
     id: panel
-    anchorItem: button
-    owner: root
+    anchorItem: root.anchorItem
+    owner: root.hostWidget || root
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
@@ -575,6 +543,21 @@ Panel {
             }
           }
         }
+      }
+
+      // F5 (D6 fix): service.actionStatus was set everywhere ("Connecting…",
+      // "Wait for the current Mullvad action to finish.", "<Label> failed",
+      // "<Label> complete", ...) but never rendered anywhere -- dead UX.
+      Text {
+        textFormat: Text.PlainText
+        visible: service.actionStatus !== ""
+        width: parent.width
+        elide: Text.ElideRight
+        text: service.actionStatus
+        color: service.actionStatus === service.lastError ? root.urgent : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
       }
 
       Text {

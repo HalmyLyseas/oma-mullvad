@@ -1,4 +1,17 @@
 #!/bin/bash
+# bounded-command finite <timeout-seconds> <max-lines> <max-bytes> -- <cmd...>
+#
+# Wraps a finite (bounded-duration) CLI read/action with a hard deadline and
+# output caps so a stuck or verbose child can't hang the panel or flood
+# memory. The long-running `mullvad status --json listen` watcher does NOT
+# go through this wrapper (F2, exchange/10-s6-fix-spec.md D2 fix): it used
+# to run as a `listen` mode here, but Quickshell's `quickshell kill` IPC
+# (what `omarchy restart shell` uses) only hard-kills its DIRECT child --
+# the wrapper's own TERM trap never runs for a wrapped grandchild, so on
+# every shell restart the bare listener was reparented to `systemd --user`
+# and kept running forever. It is now spawned directly by Service.qml's
+# Process with no wrapper; the equivalent per-line size cap is enforced in
+# QML instead (`listenerLineChars`).
 
 set -uo pipefail
 
@@ -42,25 +55,11 @@ finite-run)
   positive_integer "$max_bytes" && (( max_bytes <= 16777216 )) || fail "invalid byte limit"
   command=("$@")
   ;;
-listen)
-  (( $# >= 3 )) || fail "listen requires line-byte limit, --, and a command"
-  max_line_bytes=$1
-  shift
-  [[ ${1:-} == -- ]] || fail "missing --"
-  shift
-  (( $# > 0 )) || fail "missing command"
-  positive_integer "$max_line_bytes" && (( max_line_bytes <= 1048576 )) || fail "invalid line-byte limit"
-  command=("$@")
-  ;;
-*) fail "expected finite or listen" ;;
+*) fail "expected finite" ;;
 esac
 
 finite_cap() {
   /usr/bin/head -n "$max_lines" | /usr/bin/head -c "$max_bytes"
-}
-
-line_cap() {
-  /usr/bin/stdbuf -oL /usr/bin/fold -b -w "$max_line_bytes"
 }
 
 child_pid=""
@@ -78,17 +77,10 @@ stop_children() {
 
 trap stop_children TERM INT HUP
 
-if [[ $mode == finite-run ]]; then
-  exec 3> >(finite_cap)
-  out_pid=$!
-  exec 4> >(finite_cap >&2)
-  err_pid=$!
-else
-  exec 3> >(line_cap)
-  out_pid=$!
-  exec 4> >(line_cap >&2)
-  err_pid=$!
-fi
+exec 3> >(finite_cap)
+out_pid=$!
+exec 4> >(finite_cap >&2)
+err_pid=$!
 
 "${command[@]}" >&3 2>&4 &
 child_pid=$!

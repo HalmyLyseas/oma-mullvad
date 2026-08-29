@@ -17,8 +17,14 @@ test("command guard enforces deadlines and output limits", () => {
     result = run(["finite", "2", "100", "5", "--", "/usr/bin/printf", "123456789"]);
     assert.equal(result.stdout, "12345");
 
-    result = run(["listen", "8", "--", "/usr/bin/printf", "123456789abcdefgh\n"]);
-    assert.deepEqual(result.stdout.trimEnd().split("\n"), ["12345678", "9abcdefg", "h"]);
+    // F2 (D2 fix): the wrapper's `listen` mode was removed -- the listener
+    // process is now a direct Service.qml child with no wrapper (so
+    // Quickshell's kill IPC reaches it), and the per-line cap it used to
+    // enforce is applied in QML instead. The guard now rejects any mode
+    // other than `finite`.
+    result = run(["listen", "8", "--", "/usr/bin/printf", "hello\n"]);
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /expected finite/);
 
     const started = Date.now();
     result = run(["finite", "1", "10", "100", "--", "/usr/bin/bash", "-c", "sleep 5 &"]);

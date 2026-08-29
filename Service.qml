@@ -6,7 +6,10 @@ import "Model.js" as Model
 Item {
   id: root
 
-  property var settings: ({})
+  // Injected once by shell.ensureService() when this manifest declares
+  // kind "service" (unused directly here; kept for parity with the
+  // reference service pattern and any future shell-level need).
+  property var shell: null
   property int pollInterval: 30000
   readonly property string commandGuard: String(Qt.resolvedUrl("scripts/bounded-command")).replace(/^file:\/\//, "")
   readonly property int finiteOutputLines: 4096
@@ -79,10 +82,6 @@ Item {
   function _finiteCommand(command, timeoutSeconds) {
     return [commandGuard, "finite", String(timeoutSeconds), String(finiteOutputLines),
             String(finiteOutputChars), "--"].concat(command || [])
-  }
-
-  function _listenerCommand(command) {
-    return [commandGuard, "listen", String(listenerLineChars), "--"].concat(command || [])
   }
 
   function _resetReadOutput() {
@@ -520,12 +519,22 @@ Item {
     _runAction("excludedPidDelete", { pid: pid }, "Removing excluded process")
   }
 
+  // F6 (D9 fix): interval assigned imperatively, never live-bound. A live
+  // `interval: expr` binding restarts the countdown on any change to the
+  // expression's inputs; this timer only needs to react to actual
+  // pollInterval pushes from the widget (below), never to its own ticks.
   Timer {
-    interval: Math.max(5000, Math.min(3600000, root.pollInterval))
+    id: pollTimer
     repeat: true
     running: true
     triggeredOnStart: true
     onTriggered: root.installed ? root.refreshStatus() : root.refreshAll()
+    Component.onCompleted: interval = Math.max(5000, Math.min(3600000, root.pollInterval))
+  }
+
+  onPollIntervalChanged: {
+    pollTimer.interval = Math.max(5000, Math.min(3600000, pollInterval))
+    pollTimer.restart()
   }
 
   Timer {
@@ -569,9 +578,24 @@ Item {
     }
   }
 
+  // F2 (D2 fix): spawned as a DIRECT Process child, no bounded-command
+  // wrapper. Quickshell's `quickshell kill` hard-kills only its immediate
+  // child; a wrapped grandchild never receives that signal and is
+  // reparented to systemd --user on every shell restart (06-verdict.md D2,
+  // reproduced live in 09-s5-migration.md). The per-line size cap that the
+  // wrapper's now-removed `listen` mode used to enforce is kept here in
+  // QML instead (`listenerLineChars`, applied to every line in both
+  // onRead handlers below) so output is still bounded.
+  //
+  // Residual risk (documented, not fixed by this change): an ungraceful
+  // SIGKILL of the quickshell process itself (not the graceful
+  // `quickshell kill` IPC omarchy-restart-shell uses) can still orphan
+  // this direct child, exactly like any orphaned child of any killed
+  // process. It self-terminates on its next write once its stdout pipe's
+  // read end is gone (EPIPE) rather than running forever.
   Process {
     id: listenerProcess
-    command: root._listenerCommand(["mullvad", "status", "--json", "listen"])
+    command: ["mullvad", "status", "--json", "listen"]
     running: false
     stdout: SplitParser {
       onRead: function(line) {
