@@ -1,6 +1,6 @@
 # Threat model
 
-Scope: `halmylyseas.mullvad`, an Omarchy shell plugin driven entirely by the
+Scope: `io.github.kallupx.oma-mullvad`, an Omarchy shell plugin driven entirely by the
 local `mullvad` CLI. See `CLAUDE.md` for the hard rules this model assumes
 are enforced, and `docs/developers.md` for architecture detail.
 

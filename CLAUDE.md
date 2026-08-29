@@ -1,4 +1,4 @@
-# Mullvad VPN for the Omarchy bar (`halmylyseas.mullvad`)
+# OmaMullvad for the Omarchy bar (`io.github.kallupx.oma-mullvad`)
 
 An Omarchy shell plugin: a bar widget and panel for Mullvad VPN — connect,
 disconnect, relay/location search and favourites, DNS/anti-censorship/LAN/
@@ -7,18 +7,19 @@ driven entirely by the user's local Mullvad CLI (`mullvad`).
 
 Forked from [kallupx/oma-mullvad](https://github.com/kallupx/oma-mullvad)
 (upstream history kept; `upstream` remote points at it). The fork exists to
-diverge on identity and house rules (own marketplace listing, AUR-install
-button removed) while staying upstreamable: fixes here are meant to be
-PR-able back to kallupx where they apply.
+house rule differences (the AUR-install button removed) while staying
+upstreamable: fixes here are meant to be PR-able back to kallupx where they
+apply.
 
-Author: kallupx (upstream OmaMullvad). Fork maintained by HalmyLyseas.
+Author: kallupx (upstream OmaMullvad); a contribution fork by HalmyLyseas,
+upstream author kallupx.
 
 ## Architecture
 
 `manifest.json` declares kinds `service` + `bar-widget`. `Service.qml` is a
 machine-wide singleton (one poller/listener/action-queue total, not one per
 monitor); `BarWidget.qml` is the per-monitor bar-slot entry point, resolving
-the singleton via `bar.shell.serviceFor("halmylyseas.mullvad")`; `Panel.qml`
+the singleton via `bar.shell.serviceFor("io.github.kallupx.oma-mullvad")`; `Panel.qml`
 is the popup, injected with `bar`/`settings`/`anchorItem`/`hostWidget`/
 `service` by `BarWidget.injectPanel()`. Full detail, including why the
 panel `Loader` is gated on the service existing: `docs/developers.md`.
@@ -68,7 +69,7 @@ panel `Loader` is gated on the service existing: `docs/developers.md`.
 
 - Develop in a separate clone of the canonical installed folder (branch
   `main`), commit there, then deploy in one burst:
-  `git -C ~/.config/omarchy/plugins/halmylyseas.mullvad pull <work-clone> main`
+  `git -C ~/.config/omarchy/plugins/io.github.kallupx.oma-mullvad pull <work-clone> main`
 - `bash test/all` before every deploy; `omarchy plugin validate .` and
   qmllint (0 errors) before every commit that touches `.qml`.
 - Marketplace submission is a human-approved step only, never filed by an

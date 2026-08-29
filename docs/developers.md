@@ -9,7 +9,7 @@ clone. The README covers using it; `CLAUDE.md` carries the hard rules.
 |---|---|
 | `manifest.json` | Kinds `["service", "bar-widget"]`, `keepLoaded: true`. `entryPoints.service` is `Service.qml`, `entryPoints.barWidget` is `BarWidget.qml`. |
 | `Service.qml` | All state and the tracked Mullvad CLI Process pipeline: polling/action/listener processes, the account/relay/settings model. Also the site of one untracked, fire-and-forget spawn, `launchExcludedApp()`'s `Quickshell.execDetached()` (see "Process contract"); `Panel.qml`'s install-prompt `execDetached` is the only OTHER process-spawn site in the plugin. **Instantiated exactly once, machine-wide**, by `shell.ensureService()` the first time any bar widget or panel resolves it. One poller, one `status --json listen` listener, one action queue, regardless of monitor count. |
-| `BarWidget.qml` | The bar-slot entry point (one instance per monitor). Resolves the singleton via `shell.serviceFor("halmylyseas.mullvad")`, reactive to `shell._services` being reassigned on every service add. Owns the button + icon, and hosts `Panel.qml` through a `Loader`. |
+| `BarWidget.qml` | The bar-slot entry point (one instance per monitor). Resolves the singleton via `shell.serviceFor("io.github.kallupx.oma-mullvad")`, reactive to `shell._services` being reassigned on every service add. Owns the button + icon, and hosts `Panel.qml` through a `Loader`. |
 | `Panel.qml` | The popup: Overview, Locations, Advanced, Excluded Apps, System pages. Receives `bar`, `settings`, `anchorItem`, `hostWidget`, and `service` from `BarWidget.injectPanel()` — it never resolves the service itself. |
 | `Model.js` | Pure ES5 logic: CLI-output parsers, the mutating-command argv allowlist, redaction, field/list caps. Plain Node can `require()` it (`test/model.test.js`). |
 | `OmaDropdown.qml` / `OmaSearchableDropdown.qml` | Shared dropdown widgets ("Oma" = Omarchy, kept from upstream naming). |
@@ -228,9 +228,9 @@ Every save under `~/.config/omarchy/plugins/` reloads the whole bar, so
 develop in a separate clone and deploy in one burst:
 
 ```bash
-git -C ~/.config/omarchy/plugins/halmylyseas.mullvad pull <work-clone> main
+git -C ~/.config/omarchy/plugins/io.github.kallupx.oma-mullvad pull <work-clone> main
 omarchy restart shell   # required after structural / new-file changes
-omarchy-shell halmylyseas.mullvad __probe__   # "Function not found." = loaded
+omarchy-shell io.github.kallupx.oma-mullvad __probe__   # "Function not found." = loaded
 ```
 
 `omarchy restart shell` is required, not optional, after pulling in a new
@@ -301,9 +301,8 @@ never filed by an agent. Updates after listing go through a
 
 ## Upstreaming
 
-This fork's identity/layout commits (own manifest `id`/`author`, own
-marketplace listing) are not PR material upstream — they are this fork's
-own divergence, not a fix. The PR-able set, by topic: the
+This fork already carries the upstream manifest `id`/`author`, so no
+identity switch is needed before a PR. The PR-able set, by topic: the
 service-singleton split and unwrapped direct-child listener (the two
 process-tree bugs under "Why no shell wrapper"); `parseToggle`'s
 line-anchored match; the argv leading-`-`/path-traversal rejection;
@@ -313,13 +312,12 @@ before arming the next label; and the System tab — each a real,
 reproducible fix or policy-clean addition, not fork-specific rebranding.
 
 To upstream: cherry-pick the specific commits onto upstream `main` (remote
-`upstream`) using the **upstream** manifest id
-(`io.github.kallupx.oma-mullvad`), not `halmylyseas.mullvad` — one PR per
-concern, only after explicit human approval before anything is pushed or
-filed.
+`upstream`) — one PR per concern, only after explicit human approval before
+anything is pushed or filed.
 
 ## Credits
 
-Author: kallupx (upstream OmaMullvad). Fork maintained by HalmyLyseas.
+Author: kallupx (upstream OmaMullvad); a contribution fork by HalmyLyseas,
+upstream author kallupx.
 
 Forked from [kallupx/oma-mullvad](https://github.com/kallupx/oma-mullvad).

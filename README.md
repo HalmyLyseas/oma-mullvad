@@ -1,4 +1,4 @@
-# Mullvad VPN for the Omarchy bar
+# OmaMullvad
 
 ![Mullvad VPN preview](preview.png)
 
@@ -17,19 +17,22 @@ This plugin follows the active Omarchy theme and works with the stock bar and Sh
 
 ## Install
 
-This fork is not on the Omarchy plugin marketplace yet (no public repository
-exists for it). Until then, install it as a manual clone into the plugins
-folder:
+OmaMullvad is on the Omarchy plugin marketplace (`omarchy plugin add
+https://github.com/kallupx/oma-mullvad.git --enable`); this repository is a
+contribution fork — changes are offered upstream as pull requests.
+
+To develop against this fork directly, install it as a manual clone into
+the plugins folder instead:
 
 ```bash
-git clone <this-repo> ~/.config/omarchy/plugins/halmylyseas.mullvad
+git clone <this-repo> ~/.config/omarchy/plugins/io.github.kallupx.oma-mullvad
 ```
 
 Then enable and load it:
 
 ```bash
 omarchy-shell shell rescanPlugins   # let the running shell notice the new folder
-omarchy plugin enable halmylyseas.mullvad --section right
+omarchy plugin enable io.github.kallupx.oma-mullvad --section right
 omarchy restart shell
 ```
 
@@ -56,15 +59,15 @@ The panel has Overview, Locations, Advanced, Excluded Apps, and System pages (ke
 This plugin does not add keybindings automatically. Example `~/.config/hypr/bindings.lua` entries:
 
 ```lua
-o.bind("SUPER + SHIFT + V", "Toggle Mullvad", "omarchy-shell halmylyseas.mullvad toggleTunnel")
-o.bind("SUPER + ALT + V", "Next Mullvad favourite", "omarchy-shell halmylyseas.mullvad nextFavorite")
-o.bind("SUPER + SHIFT + ALT + V", "Mullvad panel", "omarchy-shell halmylyseas.mullvad toggle")
+o.bind("SUPER + SHIFT + V", "Toggle Mullvad", "omarchy-shell io.github.kallupx.oma-mullvad toggleTunnel")
+o.bind("SUPER + ALT + V", "Next Mullvad favourite", "omarchy-shell io.github.kallupx.oma-mullvad nextFavorite")
+o.bind("SUPER + SHIFT + ALT + V", "Mullvad panel", "omarchy-shell io.github.kallupx.oma-mullvad toggle")
 ```
 
 ## Uninstall
 
 ```bash
-omarchy plugin remove halmylyseas.mullvad
+omarchy plugin remove io.github.kallupx.oma-mullvad
 ```
 
 ## Privacy
@@ -89,7 +92,7 @@ shell wrapper anywhere on the CLI path.
 
 ## Credits
 
-Author: kallupx (upstream OmaMullvad). Fork maintained by HalmyLyseas.
+Author: kallupx. Contributions (2026): HalmyLyseas.
 
 Forked from [kallupx/oma-mullvad](https://github.com/kallupx/oma-mullvad), the
 original OmaMullvad plugin. This fork keeps its upstream history (`upstream`
@@ -97,6 +100,6 @@ remote) and intends to upstream fixes back via PR where they apply.
 
 ## License
 
-MIT © 2026 kallupx, © 2026 HalmyLyseas
+MIT © 2026 kallupx; portions © 2026 HalmyLyseas
 
 The map uses public-domain [Natural Earth](https://www.naturalearthdata.com/) data. Relay locations come from the Mullvad CLI.
