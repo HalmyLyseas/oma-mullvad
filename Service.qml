@@ -65,7 +65,11 @@ Item {
   property var packages: [] // [{ name, version, installedAt, buildAt }]
   property int daemonPid: 0
   property string updateCheckStatus: "never" // never|checking|ok|unavailable
-  property int updateCheckedAt: 0 // ms epoch, 0 = never
+  // "double", not "int": Date.now() (ms epoch, ~13 digits, e.g.
+  // 1787964699000) overflows QML's 32-bit `int` (max 2147483647) --
+  // measured live, it silently truncated/wrapped to a bogus ~10-digit
+  // value. Panel.qml's `nowMs` is already `double` for the same reason.
+  property double updateCheckedAt: 0 // ms epoch, 0 = never
   property bool updateAvailable: false
   property var updateTargets: [] // [{ name, current, latest }]
 
