@@ -8,7 +8,7 @@ Item {
 
   property var settings: ({})
   property int pollInterval: 30000
-  readonly property string commandGuard: String(Qt.resolvedUrl("bounded-command")).replace(/^file:\/\//, "")
+  readonly property string commandGuard: String(Qt.resolvedUrl("scripts/bounded-command")).replace(/^file:\/\//, "")
   readonly property int finiteOutputLines: 4096
   readonly property int finiteOutputChars: 262144
   readonly property int listenerLineChars: 8192

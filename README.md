@@ -1,6 +1,6 @@
 # Mullvad VPN for the Omarchy bar
 
-![Mullvad VPN preview](preview.gif)
+![Mullvad VPN preview](preview.png)
 
 Mullvad VPN controls for the Omarchy Quattro bar.
 
@@ -64,12 +64,13 @@ Account numbers are sent to `mullvad account login` over standard input and are 
 ## Verify
 
 ```bash
-node --test
-node tests/cli-contract.mjs
+bash test/all
 omarchy plugin validate .
 ```
 
-The CLI contract check is read-only.
+`test/all` runs the Node unit tests (`Model.js`, the `bounded-command`
+guard, a QML Text-sink audit) and then `test/cli-contract.mjs`, which is
+read-only against the real Mullvad CLI.
 
 ## Credits
 

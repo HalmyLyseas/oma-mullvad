@@ -4,7 +4,7 @@ const { join } = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const guard = join(__dirname, "..", "bounded-command");
+const guard = join(__dirname, "..", "scripts", "bounded-command");
 
 function run(args) {
     return spawnSync(guard, args, { encoding: "utf8", timeout: 4000 });
