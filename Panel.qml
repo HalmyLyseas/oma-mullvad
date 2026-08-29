@@ -614,7 +614,8 @@ Panel {
         implicitHeight: overviewHero.implicitHeight
         readonly property bool tunnelChecked: service.active
         readonly property bool tunnelBusy: service.busy || !service.installed || !service.daemonRunning
-        readonly property string tunnelTooltip: root.tunnelHint
+        readonly property string tunnelTooltip: root.cliReady ? root.tunnelHint
+          : !service.installed ? "Install Mullvad VPN first" : "Start the Mullvad daemon first"
         readonly property color controlAccent: root.accent
         function toggleTunnel() { if (!tunnelBusy) service.toggleTunnel() }
 
@@ -639,7 +640,11 @@ Panel {
               id: tunnelSwitch
               checked: overviewHeader.tunnelChecked
               busy: overviewHeader.tunnelBusy
-              activeFocusOnTab: true
+              // Same lock as the rest of the panel: greyed + out of the
+              // focus chain until the CLI and daemon are usable.
+              enabled: root.cliReady
+              opacity: root.cliReady ? 1 : 0.35
+              activeFocusOnTab: root.cliReady
               hasCursor: activeFocus
               foreground: overviewHero.foreground
               accent: overviewHeader.controlAccent
