@@ -11,12 +11,25 @@ Item {
   // reference service pattern and any future shell-level need).
   property var shell: null
   property int pollInterval: 30000
-  readonly property string commandGuard: String(Qt.resolvedUrl("scripts/bounded-command")).replace(/^file:\/\//, "")
   readonly property int finiteOutputLines: 4096
   readonly property int finiteOutputChars: 262144
   readonly property int listenerLineChars: 8192
-  // T2 (16-s8-feedback-spec.md): System-tab helper scripts, resolved the
-  // same way as commandGuard above.
+  // S10 (23-s10-native-process-spec.md): every `mullvad` invocation is now a
+  // direct Quickshell Process child (no scripts/bounded-command wrapper) --
+  // the wrapper's own bash-semantics bugs (the orphaned listener, D2; the
+  // empty stdin on `account login`, exchange/22) are the entire reason this
+  // exists. Deadlines are enforced here instead, one Timer-driven watchdog
+  // per process. readTimeoutMs/actionTimeoutMs are plain (non-QML-readonly)
+  // properties, like every other mutable-but-externally-read state in this
+  // file (e.g. `installed` below) -- exposed so test/probe/service-probe.qml
+  // can shorten them (the hang-mode test does not need to wait out the real
+  // 10s/20s deadlines). updateCheckTimeoutMs has no such need (nothing in
+  // the probe suite exercises it) so it stays a plain constant.
+  property int readTimeoutMs: 10000
+  property int actionTimeoutMs: 20000
+  readonly property int updateCheckTimeoutMs: 130000
+  // T2 (16-s8-feedback-spec.md): System-tab helper scripts, resolved via
+  // Qt.resolvedUrl() relative to this file, same as installScript below.
   readonly property string packageInfoScript: String(Qt.resolvedUrl("scripts/mullvad-package-info")).replace(/^file:\/\//, "")
   readonly property string updateCheckScript: String(Qt.resolvedUrl("scripts/mullvad-update-check")).replace(/^file:\/\//, "")
   // S9 (19-s9-install-prompt-spec.md): resolved path to the sole script
@@ -103,6 +116,26 @@ Item {
   readonly property bool busy: actionProcess.running || _actionQueue.length > 0
     || readProcess.running || _readQueue.length > 0
 
+  // S10: per-process watchdog/overflow state. `_read*WatchdogFired` etc. are
+  // one-shot flags consumed (and reset) by the matching onExited -- the
+  // pattern is github-status's probeWatchdog/probeWatchdogFired (see
+  // Service.qml there: "force-stop after Ns and treat it as a real (if
+  // inconclusive) result, never a wedge"). The *Count properties are debug
+  // counters test/probe/service-probe.qml reads to assert a watchdog/
+  // overflow actually fired, not just that SOME failure happened.
+  property bool _readWatchdogFired: false
+  property bool _actionWatchdogFired: false
+  property bool _updateCheckWatchdogFired: false
+  property bool _readOverflowed: false
+  property bool _actionOverflowed: false
+  property bool _updateCheckOverflowed: false
+  property int _readWatchdogFiredCount: 0
+  property int _actionWatchdogFiredCount: 0
+  property int _updateCheckWatchdogFiredCount: 0
+  property int _readOverflowCount: 0
+  property int _actionOverflowCount: 0
+  property int _updateCheckOverflowCount: 0
+
   function _redact(value) {
     return Model.redact(String(value || ""))
   }
@@ -113,46 +146,72 @@ Item {
     return text.length > 180 ? text.slice(0, 177) + "…" : text
   }
 
-  function _finiteCommand(command, timeoutSeconds) {
-    return [commandGuard, "finite", String(timeoutSeconds), String(finiteOutputLines),
-            String(finiteOutputChars), "--"].concat(command || [])
+  // S10: `_appendReadOutput`/`_appendActionOutput`/`_appendUpdateCheckOutput`
+  // are thin per-kind wrappers around this one shared helper (design spec:
+  // "one shared helper if it reads cleanly"). Property names are accessed
+  // dynamically via bracket notation (`root["_" + kind + "Lines"]`, valid JS
+  // even for QML-declared properties) so the three kinds ("read", "action",
+  // "updateCheck") share one implementation instead of three copies. Arrays
+  // are always REPLACED via .concat(), never mutated via .push() (QML
+  // gotcha #3 -- mutation alone doesn't notify bindings; harmless today
+  // since nothing binds reactively to these buffers, but replacing costs
+  // nothing and removes the trap for the next reader).
+  //
+  // On breach (either this line alone, or the running total, would exceed
+  // the cap): the line is capped so the total lands AT the nominal cap, not
+  // one char over it (fixes a pre-existing +1-over-cap rounding noted while
+  // building test/probe/run's flood-mode assertion), the overflow flag is
+  // set exactly once, the matching process is sent SIGTERM immediately
+  // (never left to keep producing output the queue no longer wants), and
+  // the overflow *Count is incremented for the probe suite to assert on.
+  function _procForKind(kind) {
+    if (kind === "read") return readProcess
+    if (kind === "action") return actionProcess
+    return updateCheckProcess
   }
 
-  function _resetReadOutput() {
-    _readLines = []
-    _readErrorLines = []
-    _readOutputLines = 0
-    _readOutputChars = 0
+  function _resetBoundedOutput(kind) {
+    root["_" + kind + "Lines"] = []
+    root["_" + kind + "ErrorLines"] = []
+    root["_" + kind + "OutputLines"] = 0
+    root["_" + kind + "OutputChars"] = 0
+    root["_" + kind + "Overflowed"] = false
   }
 
-  function _appendReadOutput(line, errorStream) {
-    if (_readOutputLines >= finiteOutputLines || _readOutputChars >= finiteOutputChars) return
-    var value = _redact(line)
-    var remaining = finiteOutputChars - _readOutputChars
-    if (value.length > remaining) value = value.slice(0, remaining)
-    if (errorStream) _readErrorLines.push(value)
-    else _readLines.push(value)
-    _readOutputLines++
-    _readOutputChars += value.length + 1
+  function _appendBoundedOutput(kind, line, errorStream) {
+    if (root["_" + kind + "Overflowed"]) return
+    var outLinesKey = "_" + kind + "OutputLines"
+    var outCharsKey = "_" + kind + "OutputChars"
+    var atCap = root[outLinesKey] >= finiteOutputLines || root[outCharsKey] >= finiteOutputChars
+    if (!atCap) {
+      var value = _redact(line)
+      var remaining = finiteOutputChars - root[outCharsKey]
+      if (value.length >= remaining) { value = value.slice(0, remaining); atCap = true }
+      var linesKey = errorStream ? "_" + kind + "ErrorLines" : "_" + kind + "Lines"
+      root[linesKey] = root[linesKey].concat([value])
+      root[outLinesKey] = root[outLinesKey] + 1
+      root[outCharsKey] = root[outCharsKey] + value.length
+      if (root[outLinesKey] >= finiteOutputLines) atCap = true
+    }
+    if (atCap) {
+      root["_" + kind + "Overflowed"] = true
+      root["_" + kind + "OverflowCount"] = root["_" + kind + "OverflowCount"] + 1
+      var proc = _procForKind(kind)
+      if (proc.running) proc.signal(15)
+    }
   }
 
-  function _resetActionOutput() {
-    _actionLines = []
-    _actionErrorLines = []
-    _actionOutputLines = 0
-    _actionOutputChars = 0
-  }
+  function _resetReadOutput() { _resetBoundedOutput("read") }
 
-  function _appendActionOutput(line, errorStream) {
-    if (_actionOutputLines >= finiteOutputLines || _actionOutputChars >= finiteOutputChars) return
-    var value = _redact(line)
-    var remaining = finiteOutputChars - _actionOutputChars
-    if (value.length > remaining) value = value.slice(0, remaining)
-    if (errorStream) _actionErrorLines.push(value)
-    else _actionLines.push(value)
-    _actionOutputLines++
-    _actionOutputChars += value.length + 1
-  }
+  function _appendReadOutput(line, errorStream) { _appendBoundedOutput("read", line, errorStream) }
+
+  function _resetActionOutput() { _resetBoundedOutput("action") }
+
+  function _appendActionOutput(line, errorStream) { _appendBoundedOutput("action", line, errorStream) }
+
+  function _resetUpdateCheckOutput() { _resetBoundedOutput("updateCheck") }
+
+  function _appendUpdateCheckOutput(line, errorStream) { _appendBoundedOutput("updateCheck", line, errorStream) }
 
   function _hasRead(kind) {
     if (readProcess.running && _readKind === kind) return true
@@ -161,13 +220,14 @@ Item {
     return false
   }
 
-  // T2: an optional per-request timeoutSeconds (default 10, matching every
-  // pre-existing caller) -- the "packageInfo" read needs no override (it's
-  // a plain local file read), but keeping the queue itself generic avoids
-  // giving System-tab reads a second, parallel pipeline for no reason.
-  function _enqueueRead(kind, command, timeoutSeconds) {
+  // T2: an optional per-request timeoutMs override (every pre-existing
+  // caller omits it, so root.readTimeoutMs -- the S10 watchdog default --
+  // applies uniformly; the "packageInfo" read needs no override either, a
+  // plain local file read). Keeping the queue itself generic avoids giving
+  // System-tab reads a second, parallel pipeline for no reason.
+  function _enqueueRead(kind, command, timeoutMs) {
     if (_hasRead(kind)) return
-    _readQueue = _readQueue.concat([{ kind: kind, command: command, timeoutSeconds: timeoutSeconds || 10 }])
+    _readQueue = _readQueue.concat([{ kind: kind, command: command, timeoutMs: timeoutMs || 0 }])
     _startNextRead()
   }
 
@@ -178,7 +238,9 @@ Item {
     _readQueue = queue
     _readKind = request.kind
     _resetReadOutput()
-    readProcess.command = _finiteCommand(request.command, request.timeoutSeconds || 10)
+    readWatchdog.interval = request.timeoutMs || root.readTimeoutMs
+    readWatchdog.restart()
+    readProcess.command = request.command
     readProcess.running = true
   }
 
@@ -433,23 +495,33 @@ Item {
     return _enqueueAction(_command(action, params), label)
   }
 
-  function _startNextAction() {
-    if (actionProcess.running || _actionQueue.length === 0) return
+  // S10: shared by _startNextAction() and login() (which bypasses the queue
+  // entirely, exactly like before this rework -- only how the process is
+  // armed changed). `secret`, when non-empty, is written to actionProcess's
+  // stdin and cleared on `onStarted` (see the Process below), never here.
+  function _armAction(command, label, secret) {
     // C4 (12-fable-review.md): stop the "clear actionStatus" timer before
-    // arming the next queued action's label -- otherwise a timer started by
-    // the PREVIOUS action's completion (e.g. "Selecting location complete")
-    // can still be ticking when this one sets "Connecting…", and 2.5s later
+    // arming the next action's label -- otherwise a timer started by the
+    // PREVIOUS action's completion (e.g. "Selecting location complete") can
+    // still be ticking when this one sets "Connecting…", and 2.5s later
     // blanks actionStatus out from under a still-busy queue.
     actionStatusTimer.stop()
+    _resetActionOutput()
+    actionWatchdog.interval = root.actionTimeoutMs
+    actionWatchdog.restart()
+    actionProcess.label = label
+    actionProcess.secret = secret || ""
+    actionProcess.command = command
+    actionStatus = label + "…"
+    actionProcess.running = true
+  }
+
+  function _startNextAction() {
+    if (actionProcess.running || _actionQueue.length === 0) return
     var queue = _actionQueue.slice(0)
     var action = queue.shift()
     _actionQueue = queue
-    _resetActionOutput()
-    actionProcess.label = action.label
-    actionProcess.secret = ""
-    actionProcess.command = _finiteCommand(action.command, 20)
-    actionStatus = action.label + "…"
-    actionProcess.running = true
+    _armAction(action.command, action.label, "")
   }
 
   function connectTunnel() {
@@ -488,17 +560,15 @@ Item {
       secret = ""
       return
     }
-    _resetActionOutput()
-    actionProcess.label = "Logging in"
-    actionProcess.command = _finiteCommand(command, 20)
-    actionProcess.secret = secret
-    // C4: same rationale as _startNextAction() -- login() bypasses the
-    // action queue and sets actionProcess up directly, so it needs its own
-    // stop() immediately before arming its own status text.
-    actionStatusTimer.stop()
-    actionStatus = "Logging in…"
+    // S10 (22-login-stdin-bug.md fix, this time at the mechanism level): no
+    // wrapper, no backgrounded shell job, so bash's "backgrounded command
+    // gets /dev/null as stdin" bug cannot recur -- Process.write() reaches
+    // the child's real stdin directly (measured, scratchpad/pm-native).
+    // _armAction hands `secret` to actionProcess.secret; onStarted below
+    // writes it, clears it, and closes stdin (EOF) before this function
+    // returns control to the caller.
+    _armAction(command, "Logging in", secret)
     secret = ""
-    actionProcess.running = true
   }
 
   function logout() { _runAction("logout", {}, "Logging out") }
@@ -622,28 +692,16 @@ Item {
       _updateCheckAttemptedAt = Date.now()
       updateCheckStatus = "checking"
       _resetUpdateCheckOutput()
-      updateCheckProcess.command = _finiteCommand([updateCheckScript], 130)
+      updateCheckWatchdog.interval = root.updateCheckTimeoutMs
+      updateCheckWatchdog.restart()
+      // S10: updateCheckScript stays a direct (unwrapped) bash script child
+      // -- it wraps `checkupdates`, not the Mullvad CLI, so it is outside
+      // this rework's scope (spec: "bash stays"). No bounded-command layer
+      // either way; the watchdog above is this process's only deadline now.
+      updateCheckProcess.command = [updateCheckScript]
       updateCheckProcess.running = true
     }
     return updateCheckStatus
-  }
-
-  function _resetUpdateCheckOutput() {
-    _updateCheckLines = []
-    _updateCheckErrorLines = []
-    _updateCheckOutputLines = 0
-    _updateCheckOutputChars = 0
-  }
-
-  function _appendUpdateCheckOutput(line, errorStream) {
-    if (_updateCheckOutputLines >= finiteOutputLines || _updateCheckOutputChars >= finiteOutputChars) return
-    var value = _redact(line)
-    var remaining = finiteOutputChars - _updateCheckOutputChars
-    if (value.length > remaining) value = value.slice(0, remaining)
-    if (errorStream) _updateCheckErrorLines.push(value)
-    else _updateCheckLines.push(value)
-    _updateCheckOutputLines++
-    _updateCheckOutputChars += value.length + 1
   }
 
   // F6 (D9 fix): interval assigned imperatively, never live-bound. A live
@@ -704,6 +762,34 @@ Item {
     Component.onCompleted: interval = 60000
   }
 
+  // S10: readWatchdog/readKillTimer -- pattern measured live
+  // (scratchpad/pm-native/probe/shell.qml) and modeled on github-status's
+  // probeWatchdog (Service.qml there, grep probeWatchdogFired): on fire,
+  // SIGTERM first (`signal(15)`), then a 1s killTimer escalates to
+  // SIGKILL (`signal(9)`) if the child is still alive -- `running = false`
+  // on its own only sends TERM again (measured: probe A), so it would not
+  // actually escalate anything if used here instead. Same-tick guard reads
+  // `readProcess.running` directly (skill gotcha #1), never a derived bool.
+  Timer {
+    id: readWatchdog
+    repeat: false
+    onTriggered: {
+      if (readProcess.running) {
+        root._readWatchdogFired = true
+        root._readWatchdogFiredCount++
+        readProcess.signal(15)
+        readKillTimer.restart()
+      }
+    }
+  }
+
+  Timer {
+    id: readKillTimer
+    interval: 1000
+    repeat: false
+    onTriggered: { if (readProcess.running) readProcess.signal(9) }
+  }
+
   Process {
     id: readProcess
     command: []
@@ -714,12 +800,26 @@ Item {
     stderr: SplitParser {
       onRead: function(line) { root._appendReadOutput(line, true) }
     }
-    onExited: function(exitCode) {
+    // exited(exitCode, exitStatus): exitStatus === 1 is CrashExit (killed by
+    // signal) regardless of exitCode -- measured live, a signalled child can
+    // report exitCode 0. Treated as a failure either way; folded into a
+    // nonzero exitCode so every existing per-kind branch in _applyRead()
+    // (which all key off exitCode !== 0) needs no separate crash-aware path.
+    onExited: function(exitCode, exitStatus) {
+      readWatchdog.stop()
       var kind = root._readKind
-      var raw = root._readLines.join("\n")
-      var error = root._readErrorLines.join("\n")
       root._readKind = ""
-      root._applyRead(kind, raw, error, exitCode)
+      if (root._readWatchdogFired) {
+        root._readWatchdogFired = false
+        root._applyRead(kind, "", "timed out", 124)
+      } else if (root._readOverflowed) {
+        root._applyRead(kind, "", "output limit exceeded", 137)
+      } else {
+        var raw = root._readLines.join("\n")
+        var error = root._readErrorLines.join("\n")
+        var effectiveExitCode = (exitStatus === 1 && exitCode === 0) ? 1 : exitCode
+        root._applyRead(kind, raw, error, effectiveExitCode)
+      }
       Qt.callLater(root._startNextRead)
     }
   }
@@ -768,6 +868,27 @@ Item {
     }
   }
 
+  // S10: same pattern as readWatchdog/readKillTimer above.
+  Timer {
+    id: actionWatchdog
+    repeat: false
+    onTriggered: {
+      if (actionProcess.running) {
+        root._actionWatchdogFired = true
+        root._actionWatchdogFiredCount++
+        actionProcess.signal(15)
+        actionKillTimer.restart()
+      }
+    }
+  }
+
+  Timer {
+    id: actionKillTimer
+    interval: 1000
+    repeat: false
+    onTriggered: { if (actionProcess.running) actionProcess.signal(9) }
+  }
+
   Process {
     id: actionProcess
     property string label: ""
@@ -775,6 +896,13 @@ Item {
     command: []
     running: false
     stdinEnabled: true
+    // 22-login-stdin-bug.md fix at the mechanism level: Process.write()
+    // reaches the child's real stdin directly (no backgrounded shell job to
+    // silently substitute /dev/null). Every action closes stdin via EOF
+    // right after start -- not just login -- since no action here reads
+    // further stdin once started; measured live (scratchpad/pm-native probe
+    // C): write() then stdinEnabled = false delivers EOF, a following read
+    // sees 0 bytes.
     onStarted: {
       if (secret.length > 0) {
         var value = secret
@@ -782,6 +910,7 @@ Item {
         write(value + "\n")
         value = ""
       }
+      stdinEnabled = false
     }
     stdout: SplitParser {
       onRead: function(line) { root._appendActionOutput(line, false) }
@@ -789,21 +918,62 @@ Item {
     stderr: SplitParser {
       onRead: function(line) { root._appendActionOutput(line, true) }
     }
-    onExited: function(exitCode) {
-      var output = root._actionLines.join("\n")
-      var error = root._actionErrorLines.join("\n")
-      if (exitCode !== 0) {
-        root.lastError = root._shortError(error || output, label + " failed")
+    onExited: function(exitCode, exitStatus) {
+      actionWatchdog.stop()
+      var label = actionProcess.label
+      var success = false
+      if (root._actionWatchdogFired) {
+        root._actionWatchdogFired = false
+        root.lastError = label + " timed out"
+        root.actionStatus = root.lastError
+        root._actionQueue = []
+      } else if (root._actionOverflowed) {
+        root.lastError = label + " failed: output limit exceeded"
         root.actionStatus = root.lastError
         root._actionQueue = []
       } else {
-        root.lastError = ""
-        root.actionStatus = label + " complete"
-        actionStatusTimer.restart()
+        var effectiveExitCode = (exitStatus === 1 && exitCode === 0) ? 1 : exitCode
+        var output = root._actionLines.join("\n")
+        var error = root._actionErrorLines.join("\n")
+        if (effectiveExitCode !== 0) {
+          root.lastError = root._shortError(error || output, label + " failed")
+          root.actionStatus = root.lastError
+          root._actionQueue = []
+        } else {
+          root.lastError = ""
+          root.actionStatus = label + " complete"
+          actionStatusTimer.restart()
+          success = true
+        }
       }
       root.refreshAll()
-      if (exitCode === 0) Qt.callLater(root._startNextAction)
+      if (success) Qt.callLater(root._startNextAction)
     }
+  }
+
+  // S10: same pattern again. updateCheckScript already enforces its own
+  // internal timeout (MULLVAD_UPDATE_CHECK_TIMEOUT, test/scripts.test.sh),
+  // so this watchdog is a backstop for the script hanging outright, not the
+  // primary deadline -- 130s, matching the removed bounded-command call's
+  // own timeout argument.
+  Timer {
+    id: updateCheckWatchdog
+    repeat: false
+    onTriggered: {
+      if (updateCheckProcess.running) {
+        root._updateCheckWatchdogFired = true
+        root._updateCheckWatchdogFiredCount++
+        updateCheckProcess.signal(15)
+        updateCheckKillTimer.restart()
+      }
+    }
+  }
+
+  Timer {
+    id: updateCheckKillTimer
+    interval: 1000
+    repeat: false
+    onTriggered: { if (updateCheckProcess.running) updateCheckProcess.signal(9) }
   }
 
   // T2: deliberately separate from readProcess/actionProcess -- see the
@@ -818,9 +988,22 @@ Item {
     stderr: SplitParser {
       onRead: function(line) { root._appendUpdateCheckOutput(line, true) }
     }
-    onExited: function(exitCode) {
+    onExited: function(exitCode, exitStatus) {
+      updateCheckWatchdog.stop()
+      var timedOutOrOverflowed = root._updateCheckWatchdogFired || root._updateCheckOverflowed
+      root._updateCheckWatchdogFired = false
+      if (timedOutOrOverflowed) {
+        // scripts/mullvad-update-check exit 3 (offline/lock/timeout): "does
+        // nothing" per the human's rule -- only the status flips so the UI
+        // can say so; updateAvailable/updateTargets/updateCheckedAt are
+        // left exactly as they were. A watchdog/overflow kill is treated
+        // the same way: inconclusive, not a parse-worthy result.
+        root.updateCheckStatus = "unavailable"
+        return
+      }
+      var effectiveExitCode = (exitStatus === 1 && exitCode === 0) ? 1 : exitCode
       var raw = root._updateCheckLines.join("\n")
-      if (exitCode === 0) {
+      if (effectiveExitCode === 0) {
         try {
           root.updateTargets = Model.parseUpdateCheck(raw)
         } catch (e) {
@@ -830,10 +1013,6 @@ Item {
         root.updateCheckStatus = "ok"
         root.updateCheckedAt = Date.now()
       } else {
-        // scripts/mullvad-update-check exit 3 (offline/lock/timeout): "does
-        // nothing" per the human's rule -- only the status flips so the UI
-        // can say so; updateAvailable/updateTargets/updateCheckedAt are
-        // left exactly as they were.
         root.updateCheckStatus = "unavailable"
       }
     }
