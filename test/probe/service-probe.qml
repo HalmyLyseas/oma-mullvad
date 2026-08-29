@@ -2,20 +2,12 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 
-// test/probe/service-probe.qml -- deterministic mock-CLI probe for
-// Service.qml (exchange/23-s10-native-process-spec.md, extended by N6 in
-// exchange/25-fable-review-s10.md). A ShellRoot that Loaders the real
-// Service.qml (never a copy), waits for the initial read queue to drain,
-// then drives one of a few scenarios selected by env vars test/probe/run
-// sets per invocation, and prints one "PROBE_RESULT {...}" JSON line to
-// stdout and quits. test/probe/run drives this once per scenario with
-// PATH=test/mocks:$PATH so every `mullvad`/`checkupdates` invocation
-// resolves to a mock -- this file never talks to the real daemon.
+// A ShellRoot that Loaders the real Service.qml (never a copy), waits for
+// the initial read queue to drain, then drives one of a few scenarios
+// selected by env vars, printing one "PROBE_RESULT {...}" JSON line.
 //
-// Written to run unchanged against BOTH the pre-rework and post-rework
-// Service.qml: debug counters (`_readWatchdogFiredCount` etc.) only exist
-// after the S10 rework, so every read of one goes through hasDebugCounters
-// guard below rather than assuming presence.
+// Debug counters (`_readWatchdogFiredCount` etc.) may not exist on an older
+// Service.qml, so every read of one goes through the hasDebugCounters guard.
 ShellRoot {
   id: probeRoot
 
@@ -23,24 +15,18 @@ ShellRoot {
   property bool done: false
   property int elapsedMs: 0
   property bool hasDebugCounters: false
-  // Quickshell sandboxes relative Loader.source resolution to the entry
-  // file's own directory -- a plain "../../Service.qml" silently resolves to
-  // "qrc:/qs-blackhole" instead of erroring (measured live on this box,
-  // Quickshell 0.3.1). test/probe/run exports the plugin's absolute path so
-  // this file never needs a relative upward traversal.
+  // Quickshell sandboxes relative Loader.source to the entry file's own
+  // directory -- a plain "../../Service.qml" silently resolves to a
+  // blackhole. test/probe/run exports the plugin's absolute path instead.
   property string pluginDir: Quickshell.env("MULLVAD_PLUGIN_DIR")
 
-  // N6 (25-fable-review-s10.md): which extra scenario to drive after the
-  // initial read queue drains, selected per test/probe/run invocation.
-  // Exactly one of these is ever true for a given run (test/probe/run never
-  // sets more than one).
+  // Which extra scenario to drive after the initial read queue drains --
+  // exactly one of these is ever true for a given run.
   property bool doubleLogin: Quickshell.env("MULLVAD_PROBE_DOUBLE_LOGIN") === "1"
   property bool actionOnly: Quickshell.env("MULLVAD_PROBE_ACTION_ONLY") === "1"
   property bool checkUpdatesMode: Quickshell.env("MULLVAD_PROBE_CHECK_UPDATES") === "1"
-  // S12 (28-s12-failed-start-spec.md): the `mullvad` binary vanishes
-  // mid-run -- test/probe/run points MULLVAD_MOCK_LINK at a per-run temp
-  // symlink (`mullvad` -> test/mocks/mullvad) that resolves ahead of
-  // everything else on PATH; this scenario deletes just that symlink to
+  // The `mullvad` binary vanishes mid-run: test/probe/run points
+  // MULLVAD_MOCK_LINK at a temp symlink; this scenario deletes it to
   // simulate an uninstall, then drives Service.qml's own recovery path.
   property bool removedScenario: Quickshell.env("MULLVAD_PROBE_REMOVED") === "1"
 
@@ -52,10 +38,8 @@ ShellRoot {
       probeRoot.service = item
       probeRoot.hasDebugCounters = ("_readWatchdogFiredCount" in item)
       // Short-circuit the production defaults so the hang-mode/action-hang/
-      // updatecheck-hang tests don't take the full 10s/20s/130s real
-      // deadlines (23-s10-native-process-spec.md "Timing"; updateCheckTimeoutMs
-      // gained the same probe-shortenable treatment in N6). No-op against
-      // the pre-rework Service.qml, which doesn't have these properties yet.
+      // updatecheck-hang tests don't take the full real deadlines. No-op
+      // against an older Service.qml that doesn't have these properties yet.
       if ("readTimeoutMs" in item) item.readTimeoutMs = 1500
       if ("actionTimeoutMs" in item) item.actionTimeoutMs = 1500
       if ("updateCheckTimeoutMs" in item) item.updateCheckTimeoutMs = 1200
@@ -64,9 +48,8 @@ ShellRoot {
   }
 
   // Give the Service's own triggeredOnStart pollTimer a moment to enqueue
-  // the initial read queue before polling `busy` for drain -- otherwise this
-  // probe can race the same-tick window and see busy===false before
-  // refreshAll() has actually run.
+  // the initial read queue before polling `busy` for drain -- otherwise
+  // this probe can race the same tick and see busy===false too early.
   Timer {
     id: settleTimer
     interval: 150
@@ -75,10 +58,8 @@ ShellRoot {
   }
 
   // Generic "wait until the action/read queue is idle, then run a callback"
-  // helper -- N6 replaces the old fixed two-step (drain reads, drain one
-  // login) with a small chain of steps that varies per scenario (see
-  // afterReadsDrained below), so one reusable Timer replaces what would
-  // otherwise be one bespoke Timer per step.
+  // helper -- one reusable Timer drives the small chain of steps that
+  // varies per scenario (see afterReadsDrained below).
   property var _afterBusy: null
 
   Timer {
@@ -105,15 +86,9 @@ ShellRoot {
     busyDrainTimer.start()
   }
 
-  // N1 (25-fable-review-s10.md): the "ok" scenario performs an action
-  // (connect) BEFORE logging in, then logs in TWICE -- proving stdin reuse
-  // across actions (without the fix, only the first action's stdin write
-  // ever reaches a live pipe; every later one writes into a stdin the
-  // previous action's `onStarted` already closed). The "action-hang"
-  // scenario performs ONLY connect (it exists to exercise the action
-  // watchdog in isolation; a subsequent login would just overwrite the
-  // watchdog-time lastError with its own success text). Every other
-  // scenario (fail/hang/flood) keeps the original single-login shape.
+  // The "ok" scenario performs an action (connect) BEFORE logging in, then
+  // logs in TWICE, proving stdin reuse across actions. "action-hang"
+  // performs ONLY connect, to exercise the action watchdog in isolation.
   function afterReadsDrained() {
     elapsedMs = 0
     if (removedScenario) {
@@ -137,21 +112,13 @@ ShellRoot {
     }
   }
 
-  // S12: removes the per-run temp symlink test/probe/run points `mullvad`
-  // at (see MULLVAD_MOCK_LINK above), waits for the `rm` itself to exit,
-  // then drives the action variant first -- `service.connectTunnel()`,
-  // while `installed` is still stale-true (no read has re-probed yet) --
-  // so it genuinely reaches actionProcess's own failed-start path (the
-  // bug's action-side symptom) rather than bailing out early at
-  // `_command()`'s `!installed` guard, which is what would happen if this
-  // ran after the read-side re-probe below has already flipped `installed`
-  // to false. Only then the read-side path: refreshStatus() while
-  // installed/daemonRunning are still stale-true (the "healthy" branch,
-  // enqueuing a direct `mullvad status --json` -- the read that actually
-  // hits the failed-start bug), drain, then refreshStatus() again (now
-  // daemonRunning is false, so this is "the probe path": refreshAll() ->
-  // `/usr/bin/env mullvad --version`, a NORMAL exit(127) via env itself,
-  // not a synthetic one -- this is what actually flips `installed` false).
+  // Removes the per-run temp symlink, then drives connectTunnel() first,
+  // while `installed` is still stale-true, so it reaches actionProcess's
+  // own failed-start path instead of bailing out at the `!installed` guard.
+  //
+  // Only then the read side: refreshStatus() while still stale-true, then
+  // again once daemonRunning is false -- the probe path that actually flips
+  // `installed`.
   Process {
     id: removeLinkProcess
     running: false
@@ -168,10 +135,9 @@ ShellRoot {
     }
   }
 
-  // N6: updateCheckProcess is a separate process/timer from the read/action
-  // queue (never counted in `busy`), so it is driven as its own step after
-  // the queue-based scenario above finishes, only when test/probe/run asked
-  // for it.
+  // updateCheckProcess is a separate process/timer, never counted in
+  // `busy`, so it is driven as its own step after the scenario above
+  // finishes, only when test/probe/run asked for it.
   function afterActions() {
     if (checkUpdatesMode) {
       service.checkForUpdates()
@@ -229,10 +195,8 @@ ShellRoot {
     Qt.quit()
   }
 
-  // Whole-probe-run backstop: the pre-rework Service.qml recovers hang/flood
-  // modes via scripts/bounded-command's own timeout/head caps (~10s), not a
-  // QML watchdog -- give it enough room, but never hang test/probe/run
-  // itself if something above never calls finish().
+  // Whole-probe-run backstop: never hang test/probe/run itself if
+  // something above never calls finish().
   Timer {
     interval: 25000
     running: true

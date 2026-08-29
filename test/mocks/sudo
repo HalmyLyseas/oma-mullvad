@@ -1,11 +1,7 @@
 #!/bin/bash
-# test/mocks/sudo -- PATH-shadowing mock of sudo for
-# scripts/install-mullvad tests. Records the exact command it was asked to
-# elevate (argv) to $MOCK_LOG (append) and exits 0 without ever running it
-# -- the test only needs to prove install-mullvad asks for exactly
-# "systemctl enable --now mullvad-daemon" via sudo, in the right
-# circumstances, not that systemctl itself behaves a certain way once
-# elevated.
+# PATH-shadowing mock of sudo for scripts/install-mullvad tests: logs the
+# exact command it was asked to elevate to $MOCK_LOG and exits 0 without
+# ever running it.
 set -uo pipefail
 echo "sudo $*" >> "${MOCK_LOG:-/dev/null}"
 exit 0

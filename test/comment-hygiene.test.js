@@ -4,10 +4,9 @@ const { join, extname, basename } = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-// test/comment-hygiene.test.js -- keeps every shipped file's comments short
-// and free of internal project-log references, since this tree is public.
-// Scans git ls-files (excluding fixtures and preview.png, which are inert
-// captured data/binary, not prose this project authored).
+// Keeps every shipped file's comments short and free of internal project-log
+// references, since this tree is public. Scans git ls-files (excluding
+// fixtures and preview.png, inert captured data/binary, not authored prose).
 const ROOT = join(__dirname, "..");
 
 function shippedFiles() {
@@ -16,10 +15,11 @@ function shippedFiles() {
     .filter(f => !f.startsWith("test/fixtures/") && f !== "preview.png");
 }
 
-// A comment "run" is consecutive whole-comment lines (// or #, blank lines
-// break it); a shebang's #! is never counted. Markdown files are prose, not
-// commented code, so the run-length rule does not apply to them -- rule 5
-// bounds docs/developers.md by total line count instead.
+// A comment "run" is consecutive whole-comment lines with content; a blank
+// line or a bare "//"/"#" separator breaks it without extending the run
+// (a shebang's #! is never counted either).
+//
+// Markdown is prose, not commented code, so this rule does not apply to it.
 function commentRuns(file, text) {
   if (extname(file) === ".md") return [];
   const lines = text.split("\n");
@@ -28,7 +28,9 @@ function commentRuns(file, text) {
   for (let i = 0; i < lines.length; i++) {
     const trimmed = lines[i].trim();
     const isShebang = i === 0 && trimmed.startsWith("#!");
-    const isComment = !isShebang && (trimmed.startsWith("//") || trimmed.startsWith("#"));
+    const marker = trimmed.startsWith("//") ? "//" : trimmed.startsWith("#") ? "#" : null;
+    const hasContent = marker && trimmed.slice(marker.length).trim() !== "";
+    const isComment = !isShebang && hasContent;
     if (isComment) {
       if (len === 0) start = i;
       len++;
@@ -42,11 +44,8 @@ function commentRuns(file, text) {
 }
 
 // Forbidden-token scan runs over comment text only (whole document for
-// markdown, since it is all prose) -- never over code or string literals, so
-// legitimate sample data (an account-expiry date string, a fixture package
-// name) can never trip it. A stage/finding-id reference is a bare token like
-// "S10" or "N4" followed by a delimiter; tuned so it needs that delimiter to
-// avoid catching an ordinary word.
+// markdown) -- never code or string literals, so sample data (an account-
+// expiry date, a fixture package name) can never trip it.
 const STAGE_ID = /\b[SNCDFRT][0-9]{1,2}\b(?=[\s:;,.)\]/]|$)/;
 const FORBIDDEN = [
   { name: "exchange/", re: /exchange\// },

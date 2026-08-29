@@ -1,15 +1,7 @@
 #!/bin/bash
-# scripts/mullvad-package-info -- reads pacman's LOCAL package database
-# `desc` files for mullvad-vpn / mullvad-vpn-daemon and prints one line per
-# installed package: name<TAB>version<TAB>installdate<TAB>builddate.
-#
-# No network access, no privileges, and no package-manager command is ever
-# invoked here -- this only reads root-owned but world-readable plain-text
-# files pacman itself already maintains on disk (~1 KB each). A missing
-# package is silently skipped (prints nothing for it), never an error.
-#
-# PACMAN_LOCAL_DIR lets tests point this at a fixture tree instead of the
-# real /var/lib/pacman/local.
+# Reads pacman's local `desc` files for mullvad-vpn / mullvad-vpn-daemon and
+# prints name<TAB>version<TAB>installdate<TAB>builddate per installed
+# package -- no network, no privileges, no package-manager command run.
 set -uo pipefail
 
 PACMAN_LOCAL_DIR="${PACMAN_LOCAL_DIR:-/var/lib/pacman/local}"

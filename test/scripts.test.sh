@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
-# test/scripts.test.sh -- runs scripts/mullvad-package-info (against a fake
-# pacman local DB via PACMAN_LOCAL_DIR) and scripts/mullvad-update-check
-# (with `checkupdates` shadowed on PATH by test/mocks/checkupdates), asserting
-# exit codes and output shapes. Plain assertions, no framework. Exits 0 if
-# every check passes, 1 otherwise. Mirrors halmylyseas.github-status's
-# test/scripts.test.sh shape.
+# Runs scripts/mullvad-package-info (fake pacman DB via PACMAN_LOCAL_DIR)
+# and scripts/mullvad-update-check (checkupdates shadowed by test/mocks),
+# asserting exit codes and output shapes. Plain assertions, no framework.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

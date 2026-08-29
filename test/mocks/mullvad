@@ -1,48 +1,19 @@
 #!/usr/bin/env bash
-# test/mocks/mullvad -- PATH-shadowing mock of the `mullvad` CLI, for the
-# deterministic probe suite (test/probe/). Never touches the real daemon:
-# every response is a canned fixture under test/fixtures/cli/ (captured from
-# the real 2026.4 CLI, redacted -- see 24-s10-native-process.md) or a
-# synthesized failure/hang/flood shape. Behavior is steered by
-# $MULLVAD_MOCK_MODE (default "ok"):
+# PATH-shadowing mock of the `mullvad` CLI for the deterministic probe
+# suite; never touches the real daemon. Responses are canned fixtures under
+# test/fixtures/cli/ or a synthesized failure/hang/flood shape.
 #
-#   ok    -- every subcommand below succeeds with its fixture; `account
-#            login` reads ONE stdin line and prints "login-received-len=<n>",
-#            or fails with the real INVALID_INPUT text if the line is empty
-#            (the exact upstream bug this rework exists to make impossible:
-#            exchange/22-login-stdin-bug.md).
-#   hang  -- every invocation sleeps 600s; must be killed by Service.qml's
-#            watchdog, never by anything in this script.
-#   flood -- every invocation loops forever, writing 64 KiB chunks of `x`
-#            with NO newline ever (N6, 25-fable-review-s10.md: a genuine
-#            streaming flood that never exits on its own, unlike a one-shot
-#            bounded dump -- the only way it ends is Service.qml's
-#            watchdog/overflow-cap logic actually killing it, which is
-#            exactly what this mode exists to prove).
-#   fail  -- `mullvad --version` still succeeds (so `installed` stays true and
-#            the read queue keeps going -- this is what "queue continues"
-#            means in the probe assertions); every other subcommand,
-#            including `account login`, exits 2 with stderr text.
-#   action-hang -- every READ succeeds exactly like `ok`; only `connect`
-#            sleeps 600s (N6: exercises Service.qml's actionWatchdog
-#            specifically, as distinct from the read-side `hang` mode above,
-#            which hangs the very first read and never lets `installed`
-#            become true at all).
+# $MULLVAD_MOCK_MODE selects ok/hang/flood/fail/action-hang (default "ok").
+# `account login` reads one stdin line and echoes its length, so a test can
+# prove the CLI actually received it, or fails on an empty line like the real one.
 #
-# If $MULLVAD_MOCK_LOG is set, every invocation appends its argv and the
-# `command -v mullvad` resolution to that file -- test/probe/run greps it to
-# prove PATH shadowing actually took effect for this run (never assumed).
+# $MULLVAD_MOCK_LOG, when set, logs every invocation's argv so
+# test/probe/run can prove PATH shadowing actually took effect.
 set -uo pipefail
 
-# S12 (28-s12-failed-start-spec.md): resolved via `readlink -f`, not a plain
-# `dirname "${BASH_SOURCE[0]}"` -- the "removed" probe scenario invokes this
-# script through a symlink (a per-run temp dir's `mullvad` -> this file, so
-# the CLI can be made to vanish mid-run by deleting just the symlink).
-# BASH_SOURCE reflects the PATH used to invoke the script (the symlink's own
-# directory), not its resolved target, so the plain form silently pointed
-# FIXTURES at a nonexistent path under the temp dir (measured live,
-# scratchpad/s12/linktest/) -- `readlink -f` canonicalizes through the
-# symlink first.
+# Resolved via `readlink -f`, not a plain dirname of BASH_SOURCE: the
+# "removed" probe scenario invokes this script through a symlink that gets
+# deleted mid-run, and BASH_SOURCE reflects the symlink's own directory.
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 FIXTURES="$SCRIPT_DIR/../fixtures/cli"
 MODE="${MULLVAD_MOCK_MODE:-ok}"
@@ -60,11 +31,9 @@ case "$MODE" in
     exec sleep 600
     ;;
   flood)
-    # 64 KiB chunks of 'x', no newline, forever -- built once, then printed
-    # in a loop via a bash builtin (no per-iteration fork). Quickshell keeps
-    # draining the pipe (SplitParser buffers looking for a newline that
-    # never comes) so this never blocks; the only way it stops is being
-    # signalled from outside.
+    # 64 KiB chunks of 'x', no newline, forever -- the only way this stops
+    # is being signalled from outside (SplitParser buffers looking for a
+    # newline that never comes, so it never blocks on its own).
     chunk="$(head -c 65536 /dev/zero | tr '\0' 'x')"
     while true; do printf '%s' "$chunk"; done
     ;;
@@ -86,10 +55,8 @@ if [[ "${1:-}" == "account" && "${2:-}" == "login" ]]; then
     exit 1
   fi
   # Also recorded to MULLVAD_MOCK_LOG (not just stdout): the probe's
-  # assertion needs the exact received length independent of whatever
-  # Service.qml's actionStatus text says, so a garbled-but-nonempty stdin
-  # payload can't pass as a false "login worked" (exchange/22's regression
-  # target is the exact byte count, not just non-emptiness).
+  # assertion needs the exact received length, so a garbled-but-nonempty
+  # stdin payload can't pass as a false "login worked".
   if [[ -n "${MULLVAD_MOCK_LOG:-}" ]]; then
     echo "  login-received-len=${#line}" >> "$MULLVAD_MOCK_LOG"
   fi

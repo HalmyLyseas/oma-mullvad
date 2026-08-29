@@ -1,21 +1,11 @@
 #!/usr/bin/env bash
-# test/mocks/checkupdates -- PATH-shadowing mock of pacman-contrib's
-# checkupdates for scripts/mullvad-update-check tests. Steered by
-# $MOCK_MODE (default "updates"):
-#   updates -- a mix of packages including both mullvad ones, exit 0
-#   none    -- no stdout at all, exit 2 (checkupdates' "nothing to update")
-#   offline -- a sync error on stderr, exit 1 (checkupdates' "could not check")
-#   hang    -- sleeps 30s, long enough that it is only ever brought down by
-#              being killed (scripts.test.sh kills it via a short
-#              MULLVAD_UPDATE_CHECK_TIMEOUT/the wrapper's own internal
-#              `timeout`; test/probe/run's updatecheck-hang scenario kills it
-#              via Service.qml's own updateCheckWatchdog, N6,
-#              25-fable-review-s10.md).
+# PATH-shadowing mock of pacman-contrib's checkupdates for
+# scripts/mullvad-update-check tests. $MOCK_MODE selects updates/none/
+# offline/hang, matching checkupdates' own exit-code contract.
 #
-# If $MULLVAD_MOCK_LOG is set (test/probe/run only -- test/scripts.test.sh
-# never sets it), logs "PID=$$ ..." like test/mocks/mullvad does, so
-# test/probe/run's check_no_orphans can prove this process (and not just the
-# wrapper script that spawned it) is actually gone afterwards.
+# $MULLVAD_MOCK_LOG, when set, logs "PID=$$ ..." like test/mocks/mullvad
+# does, so test/probe/run's check_no_orphans can prove this process itself
+# is gone afterwards, not just the wrapper script that spawned it.
 set -uo pipefail
 MODE="${MOCK_MODE:-updates}"
 

@@ -1,39 +1,11 @@
 #!/bin/bash
-# scripts/mullvad-update-check -- read-only wrapper around `checkupdates`
-# (pacman-contrib; the same tool Omarchy's own update indicator uses:
-# /usr/share/omarchy/bin/omarchy-update-available) that reports ONLY the
-# two Mullvad packages, never any other package's update, and never invokes
-# a package manager to change anything -- checkupdates itself never
-# modifies the local pacman database, only a private sync-db copy.
+# Read-only wrapper around `checkupdates` (pacman-contrib), reporting ONLY
+# the two Mullvad packages. Exit 0 for updates found or none, 3 for
+# "could not check" (offline/lock/timeout), letting the caller tell those apart.
 #
-# Exit codes (matching checkupdates' own contract, per 16-s8-feedback-spec.md
-# PM research): checkupdates exits 2 for "no updates at all" (not an error --
-# print nothing, exit 0 here too); exits 0 with output for "updates found"
-# (filter to the two Mullvad names, exit 0); exits 1 for offline/lock/error,
-# or our own `timeout` returns 124 -- both mean "could not check", so this
-# prints nothing and exits 3, letting the caller tell those two apart from
-# "checked, nothing to report".
-#
-# MULLVAD_UPDATE_CHECK_TIMEOUT overrides the internal timeout (default 120s)
-# for tests; the caller (Service.qml) additionally arms its own longer
-# (130s default, probe-shortenable) QML watchdog around this whole script as
-# a backstop (S10, 23-s10-native-process-spec.md -- no scripts/bounded-
-# command wrapper anymore; this script is still spawned as a direct Process,
-# unwrapped, same as it was before that rework since it wraps checkupdates,
-# not the Mullvad CLI).
-#
-# N6 (25-fable-review-s10.md): `timeout ... checkupdates` runs BACKGROUNDED
-# (`&` + `wait`), not via `output="$(...)"`, specifically so a TERM/INT
-# delivered to THIS script's own PID -- which is all Service.qml's
-# updateCheckWatchdog/updateCheckKillTimer can ever reach, being a direct-
-# child-only signal -- can be relayed to the backgrounded `timeout` via an
-# explicit trap. Measured live on this box: a plain `x="$(timeout ...
-# cmd)"` (or a foreground `cmd >file`) does NOT propagate a signal sent to
-# the wrapping shell down to its child at all -- the kernel never does this
-# automatically, so the previous form left `timeout`/`checkupdates` running
-# as orphans if Service.qml's watchdog ever fired for real. `timeout` itself
-# DOES forward a signal it receives to its own child (also measured), so
-# relaying to it here is sufficient to bring the whole chain down together.
+# Runs `timeout ... checkupdates` backgrounded (`&` + `wait`) so a TERM/INT
+# to this script's own PID relays to it via an explicit trap -- a foreground
+# `cmd >file` does not propagate a received signal to its child at all.
 set -uo pipefail
 
 timeout_seconds="${MULLVAD_UPDATE_CHECK_TIMEOUT:-120}"
