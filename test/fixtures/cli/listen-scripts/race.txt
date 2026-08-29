@@ -1,0 +1,1 @@
+500 {"state":"connected","details":{"location":{"country":"Sweden","city":"Stockholm","hostname":"se-sto-wg-001","ipv4":"198.51.100.5","mullvad_exit_ip":true}}}

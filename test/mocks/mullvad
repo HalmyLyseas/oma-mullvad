@@ -11,6 +11,38 @@ SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 FIXTURES="$SCRIPT_DIR/../fixtures/cli"
 MODE="${MULLVAD_MOCK_MODE:-ok}"
 
+# ms-precision sleep with only bash arithmetic (no bc/awk dependency).
+_sleep_ms() {
+  local ms="${1:-0}"
+  printf -v _s '%d.%03d' $((ms / 1000)) $((ms % 1000))
+  sleep "$_s"
+}
+
+# Drives MULLVAD_MOCK_LISTEN_SCRIPT: each line is "<delay-ms> <payload>",
+# payload "EXIT <code>" ends the stream, "STDERR <text>" writes to stderr.
+# Anything else is relayed to stdout verbatim, one flushed line at a time.
+_run_listen_script() {
+  local script="$1" delay payload
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ -z "$line" ]] && continue
+    delay="${line%% *}"
+    payload="${line#* }"
+    _sleep_ms "$delay"
+    case "$payload" in
+      "EXIT "*)
+        if [[ -n "${MULLVAD_MOCK_LISTENER_DIED_MARKER:-}" ]]; then
+          : > "$MULLVAD_MOCK_LISTENER_DIED_MARKER"
+        fi
+        exit "${payload#EXIT }"
+        ;;
+      "STDERR "*) printf '%s\n' "${payload#STDERR }" >&2 ;;
+      *) printf '%s\n' "$payload" ;;
+    esac
+  done < "$script"
+  # Script exhausted with no EXIT line: block like the real long-lived listener.
+  exec sleep 600
+}
+
 if [[ -n "${MULLVAD_MOCK_LOG:-}" ]]; then
   {
     echo "PID=$$ MODE=$MODE ARGV: $*"
@@ -65,8 +97,27 @@ fi
 # --- ok (and fail-mode's still-succeeding --version) mode: canned fixtures --
 case "$*" in
   "--version") cat "$FIXTURES/version.txt"; exit 0 ;;
-  "status --json") cat "$FIXTURES/status-json.txt"; exit 0 ;;
+  "status --json")
+    # A one-shot delayed-poll trigger: only the invocation that finds the
+    # trigger file is slowed, and it consumes the file so later polls are not.
+    if [[ -n "${MULLVAD_MOCK_STATUS_DELAY_TRIGGER:-}" && -f "$MULLVAD_MOCK_STATUS_DELAY_TRIGGER" ]]; then
+      rm -f "$MULLVAD_MOCK_STATUS_DELAY_TRIGGER"
+      _sleep_ms "${MULLVAD_MOCK_STATUS_DELAY_MS:-1500}"
+    fi
+    cat "$FIXTURES/status-json.txt"
+    exit 0
+    ;;
   "status --json listen")
+    # A prior scripted run's EXIT step marks this file; the very next listen
+    # replays connected once instead of re-running the script from line one.
+    if [[ -n "${MULLVAD_MOCK_LISTENER_DIED_MARKER:-}" && -f "$MULLVAD_MOCK_LISTENER_DIED_MARKER" ]]; then
+      rm -f "$MULLVAD_MOCK_LISTENER_DIED_MARKER"
+      cat "$FIXTURES/listen-scripts/respawn-connected.txt"
+      exec sleep 600
+    fi
+    if [[ -n "${MULLVAD_MOCK_LISTEN_SCRIPT:-}" ]]; then
+      _run_listen_script "$MULLVAD_MOCK_LISTEN_SCRIPT"
+    fi
     cat "$FIXTURES/status-listen.txt"
     # Long-lived, exactly like the real listener: block until signalled.
     exec sleep 600

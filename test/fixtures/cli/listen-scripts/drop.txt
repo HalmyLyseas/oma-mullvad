@@ -1,0 +1,3 @@
+0 {"state":"connected","details":{"location":{"country":"Sweden","city":"Stockholm","hostname":"se-sto-wg-001","ipv4":"198.51.100.5","mullvad_exit_ip":true}}}
+300 {"state":"error","details":{"error":"establish_tunnel_device","cause":"tunnel_parameter_error"}}
+300 {"state":"disconnected","details":{"location":{"country":"France","city":"Pantin","ipv4":"203.0.113.10"},"locked_down":false}}
