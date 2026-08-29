@@ -123,8 +123,12 @@ check_no_engine_errors() {
   local log="$1" label="$2"
   local count
   count="$(grep -c 'TypeError\|ReferenceError\|ERROR' "$log" 2>/dev/null)"
-  [[ "${count:-0}" -eq 0 ]] && ok "$label: 0 TypeError/ReferenceError/QML load ERROR in the log" \
-    || not_ok "$label: 0 TypeError/ReferenceError/QML load ERROR in the log (got $count)"
+  if [[ "${count:-0}" -eq 0 ]]; then
+    ok "$label: 0 TypeError/ReferenceError/QML load ERROR in the log"
+  else
+    not_ok "$label: 0 TypeError/ReferenceError/QML load ERROR in the log (got $count)"
+    grep 'TypeError\|ReferenceError\|ERROR' "$log" | head -5 | sed 's/^/    /'
+  fi
 }
 
 echo "== (1) locked: CLI absent (mock --version fails) =="
