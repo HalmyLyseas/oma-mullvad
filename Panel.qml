@@ -313,11 +313,14 @@ Panel {
     return result
   }
 
-  // Locations / Advanced / Excluded need the Mullvad CLI: while it is
-  // absent they are greyed out and unreachable (tab click, 2/3/4 keys and
+  // Locations / Advanced / Excluded need the Mullvad CLI and daemon: while
+  // either is missing they are greyed out and unreachable (tab click, 2/3/4 keys and
   // H/L both skip them) so an empty relay list or dead toggles can never be
   // mistaken for a bug. Overview (install prompt) and System stay available.
-  readonly property bool pagesLocked: !service.installed
+  // "CLI ready" = CLI present AND daemon reachable; both are needed for
+  // relays, settings and split tunneling, so the same lock covers both.
+  readonly property bool cliReady: service.installed && service.daemonRunning
+  readonly property bool pagesLocked: !cliReady
   function pageAvailable(index) { return index === 0 || index === 4 || !pagesLocked }
 
   function showPage(index) {
@@ -915,7 +918,8 @@ Panel {
         label: "Lockdown mode"
         description: "Block all network access whenever Mullvad is disconnected"
         checked: service.lockdown
-        enabled: !service.busy && service.installed
+        enabled: !service.busy && root.cliReady
+        opacity: root.cliReady ? 1 : 0.35
         foreground: root.foreground
         fontFamily: root.fontFamily
         onClicked: service.setLockdown(!service.lockdown)
@@ -925,7 +929,8 @@ Panel {
         label: "Auto-connect"
         description: "Connect Mullvad when its daemon starts"
         checked: service.autoConnect
-        enabled: !service.busy && service.installed
+        enabled: !service.busy && root.cliReady
+        opacity: root.cliReady ? 1 : 0.35
         foreground: root.foreground
         fontFamily: root.fontFamily
         onClicked: service.setAutoConnect(!service.autoConnect)
@@ -935,7 +940,8 @@ Panel {
         label: "Local network sharing"
         description: "Allow access to devices on the local network"
         checked: service.lanSharing
-        enabled: !service.busy && service.installed
+        enabled: !service.busy && root.cliReady
+        opacity: root.cliReady ? 1 : 0.35
         foreground: root.foreground
         fontFamily: root.fontFamily
         onClicked: service.setLanSharing(!service.lanSharing)
