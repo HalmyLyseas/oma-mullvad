@@ -136,6 +136,19 @@ The listener also validates JSON itself before calling `_applyStatus` —
 truncated (`listenerLineChars`-capped) line. `listenerRestartMs` (default
 5 s, probe-shortenable) gates the respawn delay after the listener exits.
 
+## CLI version pin
+
+`Model.SUPPORTED_CLI_VERSIONS` lists the Mullvad CLI releases this plugin
+has actually been tested against. `Model.isCliVersionSupported(version)`
+matches on the `major.minor` prefix only, so a patch release like
+`2026.4.1` still counts as `2026.4`; anything else is untested. `Service.
+cliVersionSupported` is `null` until the CLI version is known, then the
+above check's result. The Overview hero and the System tab's CLI line
+both show a dim "untested" notice when it is `false`; `test/cli-
+contract.mjs` fails loudly if the installed CLI ever drifts ahead of the
+pinned list, so an upgrade is a deliberate edit to that list, not a
+silent surprise.
+
 ## Why no shell wrapper
 
 A shell wrapper around a CLI call is a **grandchild** relationship as far
@@ -197,6 +210,12 @@ that is correct, not a regression.
   `IpcHandler` (it needs Panel-local favourites/recents state), one
   instance per monitor. Quickshell logs a benign "Handler was registered
   but will not be used" warning for every monitor after the first.
+- **`lockdown(mode: string)` IPC.** Accepts only the literal strings "on"/
+  "off"; anything else is a no-op rather than guessing. It is a thin
+  wrapper over `service.setLockdown(bool)` -- the same call the Advanced
+  page's toggle makes -- so scripted control and the UI stay identical.
+  `systemInfo()` reports the resulting `lockdown` boolean alongside
+  `cliVersionSupported`.
 - **`bar.shell.*` undocumented shell-internal surface.** `serviceFor(id)`
   (load-bearing), `appLibrary`/`.refreshIcons()`, and
   `updateEntryInline(id, entry)` are used here but not part of any
