@@ -307,15 +307,32 @@ Panel {
     return flags
   }
 
+  // Excluded tab: the sorted/filtered app list is memoized per query and
+  // invalidated only when the shell's app library reports a change, so
+  // entering the tab does not re-sort every desktop entry each time the
+  // page component is (re)created.
+  property string _appRowsQuery: "\u0000"
+  property var _appRowsCache: []
+  function invalidateAppRows() { _appRowsQuery = "\u0000" }
+
   function appRows() {
     if (!bar || !bar.shell || !bar.shell.appLibrary) return []
+    if (_appRowsQuery === appQuery) return _appRowsCache
     var source = bar.shell.appLibrary.sortedEntries(appQuery)
     var result = []
     for (var i = 0; i < source.length && result.length < 30; i++) {
       var entry = source[i].entry || source[i]
       if (entry && entry.id) result.push(entry)
     }
+    _appRowsCache = result
+    _appRowsQuery = appQuery
     return result
+  }
+
+  Connections {
+    target: bar && bar.shell ? bar.shell.appLibrary : null
+    ignoreUnknownSignals: true
+    function onAppsChanged() { root.invalidateAppRows() }
   }
 
   // Locations / Advanced / Excluded need the Mullvad CLI and daemon: while
@@ -1847,8 +1864,13 @@ Panel {
       Image {
         Layout.preferredWidth: Style.space(24)
         Layout.preferredHeight: Style.space(24)
-        sourceSize.width: width
-        sourceSize.height: height
+        // Fixed sourceSize (not bound to width, which settles after the
+        // first load) and asynchronous decoding: 30 icon rasterizations no
+        // longer block the GUI thread when the tab opens.
+        sourceSize.width: Style.space(24)
+        sourceSize.height: Style.space(24)
+        asynchronous: true
+        cache: true
         source: appRow.library && appRow.app ? appRow.library.iconSource(String(appRow.app.icon || "")) : ""
         fillMode: Image.PreserveAspectFit
       }
