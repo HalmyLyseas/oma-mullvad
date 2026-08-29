@@ -18,6 +18,7 @@ Item {
   property int readTimeoutMs: 10000
   property int actionTimeoutMs: 20000
   property int updateCheckTimeoutMs: 130000
+  property int listenerRestartMs: 5000
   // System-tab helper scripts, resolved via Qt.resolvedUrl() relative to
   // this file, same as installScript below.
   readonly property string packageInfoScript: String(Qt.resolvedUrl("scripts/mullvad-package-info")).replace(/^file:\/\//, "")
@@ -46,6 +47,15 @@ Item {
   property string accountExpiry: ""
   property int accountDaysRemaining: -1
   property bool tunnelDropWarning: false
+
+  // Bar/panel icon truth, testable without any UI: BarWidget just binds
+  // `svc ? svc.stateIcon : "connecting"` and keeps its own null fallback.
+  readonly property string stateIcon: state === "checking" ? "connecting"
+    : !installed || (installed && !daemonRunning) || state === "error" ? "error"
+    : state === "blocked" ? "warning"
+    : tunnelDropWarning || (loggedIn && accountDaysRemaining >= 0 && accountDaysRemaining <= 7) ? "warning"
+    : transitional ? "connecting"
+    : connected ? "connected" : "disconnected"
 
   property var locations: []
   property var providers: []
@@ -136,6 +146,19 @@ Item {
   property int _updateCheckGen: 0
   property int _updateCheckExitedGen: -1
 
+  // Arrival-order guard for status updates from two independent sources
+  // (the status poll and the listener): each capture their own seq at
+  // start and only apply if nothing newer has applied since.
+  property int _statusSeq: 0
+  property int _statusApplySeq: 0
+  property int _pendingStatusSeq: 0
+  // Last applied status per source, bounded, for probing that an
+  // intermediate poll actually happened between two listener events.
+  property var _statusHistory: []
+  // Length of the last listener line AFTER truncation, so a probe can
+  // confirm an over-long line was actually capped, not merely ignored.
+  property int _lastListenerLineChars: 0
+
   function _redact(value) {
     return Model.redact(String(value || ""))
   }
@@ -220,6 +243,9 @@ Item {
     var request = queue.shift()
     _readQueue = queue
     _readKind = request.kind
+    // Captured at START, not at apply time: a slow poll must lose to a
+    // listener event that arrived while it was still in flight.
+    if (request.kind === "status") root._pendingStatusSeq = ++root._statusSeq
     _resetReadOutput()
     _readGen = _readGen + 1
     readWatchdog.interval = request.timeoutMs || root.readTimeoutMs
@@ -262,7 +288,10 @@ Item {
     } else refreshAll()
   }
 
-  function _applyStatus(raw) {
+  // `seq`/`source` are omitted by callers that don't care about ordering
+  // (there are none left); both real sources always pass them.
+  function _applyStatus(raw, seq, source) {
+    if (seq !== undefined && seq < root._statusApplySeq) return
     var parsed = Model.parseStatus(raw)
     state = String(parsed.state || "unknown")
     connected = parsed.connected === true
@@ -282,6 +311,8 @@ Item {
     else if (state === "disconnected") statusText = "Disconnected"
     else if (state === "error") statusText = "Tunnel error"
     else statusText = state ? state.charAt(0).toUpperCase() + state.slice(1) : "Unknown"
+    if (seq !== undefined) root._statusApplySeq = seq
+    root._statusHistory = root._statusHistory.concat([{ source: source || "", state: state }]).slice(-12)
   }
 
   function _updateCurrentCodes() {
@@ -350,7 +381,7 @@ Item {
         return
       }
       try {
-        _applyStatus(raw)
+        _applyStatus(raw, root._pendingStatusSeq, "poll")
         if (lastError.indexOf("Mullvad daemon unavailable") === 0) lastError = ""
         _ensureListener()
       } catch (e) {
@@ -725,9 +756,10 @@ Item {
     pollTimer.restart()
   }
 
+  // interval assigned imperatively at arm time (listenerProcess.onExited),
+  // never live-bound to listenerRestartMs -- same reasoning as pollTimer.
   Timer {
     id: listenerRestart
-    interval: 5000
     repeat: false
     onTriggered: root._ensureListener()
   }
@@ -863,9 +895,19 @@ Item {
     stdout: SplitParser {
       onRead: function(line) {
         var boundedLine = String(line || "").slice(0, root.listenerLineChars)
+        root._lastListenerLineChars = boundedLine.length
         if (!boundedLine.trim()) return
+        // Model.parseStatus never throws -- unparseable JSON silently maps
+        // to "unknown". Validate JSON here first, so garbage is dropped
+        // instead of overwriting a known-good state.
         try {
-          root._applyStatus(boundedLine)
+          JSON.parse(boundedLine)
+        } catch (e) {
+          root.lastError = root._shortError(e, "Could not parse live Mullvad status")
+          return
+        }
+        try {
+          root._applyStatus(boundedLine, ++root._statusSeq, "listener")
         } catch (e) {
           root.lastError = root._shortError(e, "Could not parse live Mullvad status")
         }
@@ -880,6 +922,7 @@ Item {
     onExited: function() {
       if (root.installed) {
         root.refreshStatus()
+        listenerRestart.interval = root.listenerRestartMs
         listenerRestart.restart()
       }
     }

@@ -16,15 +16,9 @@ BarWidget {
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color barForeground: bar ? bar.barForeground : Color.foreground
 
-  // Bar-side state derived from the service. Every read is null-guarded:
-  // the bar paints this widget before the service resolves on first load.
-  readonly property string stateIcon: !svc ? "connecting"
-    : svc.state === "checking" ? "connecting"
-    : !svc.installed || (svc.installed && !svc.daemonRunning) || svc.state === "error" ? "error"
-    : svc.state === "blocked" ? "warning"
-    : svc.tunnelDropWarning || (svc.loggedIn && svc.accountDaysRemaining >= 0 && svc.accountDaysRemaining <= 7) ? "warning"
-    : svc.transitional ? "connecting"
-    : svc.connected ? "connected" : "disconnected"
+  // Icon truth lives on the service (Service.qml `stateIcon`, testable
+  // without any UI); this is just the null fallback before svc resolves.
+  readonly property string stateIcon: svc ? svc.stateIcon : "connecting"
   readonly property color stateColor: stateIcon === "error" || stateIcon === "warning" ? urgent
     : (svc && svc.connected) ? foreground
     : Qt.darker(foreground, 1.55)
