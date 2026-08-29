@@ -14,32 +14,19 @@ Item {
   readonly property int finiteOutputLines: 4096
   readonly property int finiteOutputChars: 262144
   readonly property int listenerLineChars: 8192
-  // S10 (23-s10-native-process-spec.md): every `mullvad` invocation is now a
-  // direct Quickshell Process child (no scripts/bounded-command wrapper) --
-  // the wrapper's own bash-semantics bugs (the orphaned listener, D2; the
-  // empty stdin on `account login`, exchange/22) are the entire reason this
-  // exists. Deadlines are enforced here instead, one Timer-driven watchdog
-  // per process. readTimeoutMs/actionTimeoutMs/updateCheckTimeoutMs are
-  // plain (non-QML-readonly) properties, like every other mutable-but-
-  // externally-read state in this file (e.g. `installed` below) -- exposed
-  // so test/probe/service-probe.qml can shorten them (N6,
-  // 25-fable-review-s10.md: the probe now also drives updateCheckProcess's
-  // own watchdog directly, so its deadline needs to be probe-shortenable
-  // too, exactly like the read/action ones already were). Production
-  // defaults are unchanged.
+  // Every `mullvad` call is a direct Quickshell Process child, never a shell
+  // wrapper -- see docs/developers.md, Process contract. Deadlines below are
+  // plain (non-readonly) so the probe suite can shorten them for tests.
   property int readTimeoutMs: 10000
   property int actionTimeoutMs: 20000
   property int updateCheckTimeoutMs: 130000
-  // T2 (16-s8-feedback-spec.md): System-tab helper scripts, resolved via
-  // Qt.resolvedUrl() relative to this file, same as installScript below.
+  // System-tab helper scripts, resolved via Qt.resolvedUrl() relative to
+  // this file, same as installScript below.
   readonly property string packageInfoScript: String(Qt.resolvedUrl("scripts/mullvad-package-info")).replace(/^file:\/\//, "")
   readonly property string updateCheckScript: String(Qt.resolvedUrl("scripts/mullvad-update-check")).replace(/^file:\/\//, "")
-  // S9 (19-s9-install-prompt-spec.md): resolved path to the sole script
-  // allowed to contain package-manager/service-manager/sudo literals. Never
-  // spawned directly by this service -- only Panel.qml reads this property
-  // to hand it, already shell-quoted, to
-  // omarchy-launch-floating-terminal-with-presentation from behind a
-  // ConfirmDialog.
+  // The sole script allowed to contain package-manager/service-manager/sudo
+  // literals. Never spawned here -- Panel.qml hands it, shell-quoted, to
+  // omarchy-launch-floating-terminal-with-presentation behind a ConfirmDialog.
   readonly property string installScript: String(Qt.resolvedUrl("scripts/install-mullvad")).replace(/^file:\/\//, "")
 
   property bool installed: false
@@ -79,7 +66,7 @@ Item {
   property var antiCensorship: ({ mode: "auto", port: "any" })
   property var excludedPids: []
 
-  // T2 (16-s8-feedback-spec.md): System tab -- binaries/daemon/updates.
+  // System tab: binaries/daemon/updates state.
   property string cliVersion: ""
   property string daemonVersion: ""
   property var daemonSupported: null // bool|null
@@ -87,10 +74,8 @@ Item {
   property var packages: [] // [{ name, version, installedAt, buildAt }]
   property int daemonPid: 0
   property string updateCheckStatus: "never" // never|checking|ok|unavailable
-  // "double", not "int": Date.now() (ms epoch, ~13 digits, e.g.
-  // 1787964699000) overflows QML's 32-bit `int` (max 2147483647) --
-  // measured live, it silently truncated/wrapped to a bogus ~10-digit
-  // value. Panel.qml's `nowMs` is already `double` for the same reason.
+  // "double", not "int": Date.now() (~13-digit ms epoch) overflows QML's
+  // 32-bit `int` and silently wraps. Panel.qml's `nowMs` is `double` too.
   property double updateCheckedAt: 0 // ms epoch, 0 = never
   property bool updateAvailable: false
   property var updateTargets: [] // [{ name, current, latest }]
@@ -108,7 +93,7 @@ Item {
   property var _actionErrorLines: []
   property int _actionOutputLines: 0
   property int _actionOutputChars: 0
-  // T2: updateCheckProcess's own output buffers (separate Process, see
+  // updateCheckProcess's own output buffers (separate Process; see
   // checkForUpdates() below).
   property double _updateCheckAttemptedAt: 0 // ms epoch of the last started check (debounce)
   property var _updateCheckLines: []
@@ -118,13 +103,9 @@ Item {
   readonly property bool busy: actionProcess.running || _actionQueue.length > 0
     || readProcess.running || _readQueue.length > 0
 
-  // S10: per-process watchdog/overflow state. `_read*WatchdogFired` etc. are
-  // one-shot flags consumed (and reset) by the matching onExited -- the
-  // pattern is github-status's probeWatchdog/probeWatchdogFired (see
-  // Service.qml there: "force-stop after Ns and treat it as a real (if
-  // inconclusive) result, never a wedge"). The *Count properties are debug
-  // counters test/probe/service-probe.qml reads to assert a watchdog/
-  // overflow actually fired, not just that SOME failure happened.
+  // Per-process watchdog/overflow state. `_read*WatchdogFired` etc. are
+  // one-shot flags consumed by the matching onExited; the `*Count`
+  // properties let test/probe/service-probe.qml assert a watchdog actually fired.
   property bool _readWatchdogFired: false
   property bool _actionWatchdogFired: false
   property bool _updateCheckWatchdogFired: false
@@ -137,62 +118,15 @@ Item {
   property int _readOverflowCount: 0
   property int _actionOverflowCount: 0
   property int _updateCheckOverflowCount: 0
-  // N2 (25-fable-review-s10.md): the PID each *KillTimer is allowed to
-  // signal(9), captured from Process.processId in that process's own
-  // onStarted. Guards against a stale kill timer (see the timers
-  // themselves, below) escalating against a DIFFERENT process than the one
-  // that armed it -- e.g. a read that exits promptly on the watchdog's own
-  // signal(15) lets the queue start the NEXT read before the still-ticking
-  // 1s kill timer fires; without this guard that timer's `if (proc.running)
-  // proc.signal(9)` would be true again (a NEW child is now running) and
-  // SIGKILL the wrong process.
+  // The PID each *KillTimer may signal(9), captured at that process's own
+  // onStarted -- guards a stale kill timer from escalating against a NEW
+  // process the queue already started in place of the one that armed it.
   property int _readArmedPid: 0
   property int _actionArmedPid: 0
   property int _updateCheckArmedPid: 0
-  // S12 (28-s12-failed-start-spec.md): a Process whose binary is missing
-  // logs Quickshell's own "Process failed to start" warning and flips
-  // `running` to false WITHOUT ever emitting `exited` (measured live,
-  // scratchpad/s12/ -- neither `onStarted` nor `onExited` fires; a normal
-  // exit's `running:true->false` transition, by contrast, is always
-  // immediately followed by `exited`, ALSO measured live, scratchpad/s12/
-  // probe3.qml). Every onExited body below used to be the ONLY place a
-  // read/action/updateCheck got finalized (watchdog/kill timer stopped,
-  // result applied, queue continued) -- a failed-start read therefore never
-  // applied its result at all (stale `_readKind`, watchdog left armed
-  // harmless-but-dirty), a failed-start action left `actionStatus` stuck at
-  // "<label>…" forever with no `refreshAll()` (installed/daemonRunning
-  // never re-checked), and the live listener kept streaming from a daemon
-  // whose CLI binary no longer resolves. Fixed by a per-process
-  // `onRunningChanged` that schedules a `Qt.callLater` check (deferred so a
-  // normal exit's own `exited` -- which also flips `running`, and always
-  // fires first, same probe3.qml evidence -- has already run) that
-  // synthesizes the same finalize call with exitCode 127 when `exited`
-  // never came.
-  //
-  // A single boolean "have we seen exited yet" flag is NOT enough here and
-  // was measured to corrupt the read queue: `_readFinalize`'s own
-  // `Qt.callLater(root._startNextRead)` (queued from the REAL onExited,
-  // which fires first) starts arming the NEXT read in the SAME callLater
-  // batch that also contains the FIRST read's now-stale onRunningChanged
-  // check (queued second). Back-to-back fast/successful reads (the mock
-  // suite's `cat`-a-fixture reads all complete inside a single tick) can
-  // therefore let `_startNextRead()` reset a plain boolean flag back to
-  // `false` for read N+1 BEFORE read N's own stale callLater callback
-  // finally runs -- that callback then misreads read N+1's fresh "armed,
-  // not yet exited" state as read N's own missing exit and synthesizes a
-  // bogus failure against the wrong (still legitimately running) process,
-  // clobbering `_readKind` and double-queuing `_startNextRead()`. Measured
-  // live: this exact race made the "ok" scenario's `relay list` read get
-  // invoked 3x and `locationsLength` come back 0 before this was found and
-  // fixed (test/all's first post-fix run, this pass). Fixed with a
-  // monotonically increasing generation counter per kind instead of a
-  // boolean: `_startNextRead()`/`_armAction()`/`checkForUpdates()` bump
-  // `_<kind>Gen` on every arm; the real `onExited` stamps
-  // `_<kind>ExitedGen = _<kind>Gen`; the deferred check captures the
-  // generation synchronously (before scheduling) and only acts if
-  // `_<kind>Gen` still equals what it captured AND no real exit stamped
-  // that same generation -- so a stale callback for an already-superseded
-  // arm is always a safe no-op, however late it actually runs.
+  // A Process whose binary is missing flips `running` false without ever
+  // emitting `exited`; each finalize function below also runs from a
+  // deferred check for that case. See docs/developers.md, Process contract.
   property int _readGen: 0
   property int _readExitedGen: -1
   property int _actionGen: 0
@@ -210,24 +144,9 @@ Item {
     return text.length > 180 ? text.slice(0, 177) + "…" : text
   }
 
-  // S10: `_appendReadOutput`/`_appendActionOutput`/`_appendUpdateCheckOutput`
-  // are thin per-kind wrappers around this one shared helper (design spec:
-  // "one shared helper if it reads cleanly"). Property names are accessed
-  // dynamically via bracket notation (`root["_" + kind + "Lines"]`, valid JS
-  // even for QML-declared properties) so the three kinds ("read", "action",
-  // "updateCheck") share one implementation instead of three copies. Arrays
-  // are always REPLACED via .concat(), never mutated via .push() (QML
-  // gotcha #3 -- mutation alone doesn't notify bindings; harmless today
-  // since nothing binds reactively to these buffers, but replacing costs
-  // nothing and removes the trap for the next reader).
-  //
-  // On breach (either this line alone, or the running total, would exceed
-  // the cap): the line is capped so the total lands AT the nominal cap, not
-  // one char over it (fixes a pre-existing +1-over-cap rounding noted while
-  // building test/probe/run's flood-mode assertion), the overflow flag is
-  // set exactly once, the matching process is sent SIGTERM immediately
-  // (never left to keep producing output the queue no longer wants), and
-  // the overflow *Count is incremented for the probe suite to assert on.
+  // Read/action/updateCheck output share one bounded-append helper: arrays
+  // are always replaced (never .push()ed) so bindings notice, and a breach
+  // caps the total at the limit and SIGTERMs the process immediately.
   function _procForKind(kind) {
     if (kind === "read") return readProcess
     if (kind === "action") return actionProcess
@@ -284,11 +203,9 @@ Item {
     return false
   }
 
-  // T2: an optional per-request timeoutMs override (every pre-existing
-  // caller omits it, so root.readTimeoutMs -- the S10 watchdog default --
-  // applies uniformly; the "packageInfo" read needs no override either, a
-  // plain local file read). Keeping the queue itself generic avoids giving
-  // System-tab reads a second, parallel pipeline for no reason.
+  // Optional per-request timeoutMs override; omitted callers fall back to
+  // root.readTimeoutMs. Keeps System-tab reads on the same generic queue
+  // instead of a second pipeline.
   function _enqueueRead(kind, command, timeoutMs) {
     if (_hasRead(kind)) return
     _readQueue = _readQueue.concat([{ kind: kind, command: command, timeoutMs: timeoutMs || 0 }])
@@ -324,26 +241,21 @@ Item {
     _enqueueRead("dns", ["mullvad", "dns", "get"])
     _enqueueRead("antiCensorship", ["mullvad", "anti-censorship", "get"])
     _enqueueRead("excludedPids", ["mullvad", "split-tunnel", "list"])
-    // T2: cheap/local System-tab reads run on every refreshAll() (install
-    // detection, panel open) -- NOT the network update check, which only
-    // ever runs from the hourly systemTimer or the explicit "Check now"
-    // button (checkForUpdates()). "version" queries the already-running
-    // daemon (no network of its own); "packageInfo" only reads local
-    // pacman metadata files.
+    // Cheap/local System-tab reads run on every refreshAll(); the network
+    // update check only ever runs from systemTimer or "Check now"
+    // (checkForUpdates()), never here.
     _enqueueRead("version", ["mullvad", "version"])
     _enqueueRead("daemonPid", ["pgrep", "-x", "mullvad-daemon"])
     _enqueueRead("packageInfo", [packageInfoScript])
   }
 
-  // 27b F2: while the daemon is reported down, go through the full probe
-  // path instead of the cheap status poll -- otherwise a CLI uninstalled
-  // mid-session keeps being misreported as "daemon unavailable" (with the
-  // wrong recovery button) until the user refreshes by hand. Healthy state
-  // (installed && daemonRunning) keeps the cheap status + pid poll.
+  // While the daemon is reported down, go through the full probe path
+  // instead of the cheap status poll -- otherwise a CLI removed mid-session
+  // stays misreported as "daemon unavailable" until refreshed by hand.
   function refreshStatus() {
     if (installed && daemonRunning) {
       _enqueueRead("status", ["mullvad", "status", "--json"])
-      // T2: cheap (local pgrep), read alongside every routine status poll.
+      // Cheap (local pgrep), read alongside every routine status poll.
       _enqueueRead("daemonPid", ["pgrep", "-x", "mullvad-daemon"])
     } else refreshAll()
   }
@@ -401,9 +313,8 @@ Item {
         statusText = "Mullvad is not installed"
         lastError = "Mullvad CLI not found. Use the install button below, or install the mullvad-vpn package and refresh."
         cliVersion = ""
-        // S12: previously left stale -- the System tab kept showing a
-        // daemon version/support/upgrade suggestion from before the CLI
-        // disappeared.
+        // Reset alongside cliVersion so the System tab never keeps showing
+        // a stale daemon version/support string after the CLI disappears.
         daemonVersion = ""
         daemonSupported = null
         suggestedUpgrade = ""
@@ -416,11 +327,9 @@ Item {
       return
     }
 
-    // T2: daemonPid must reset to 0 when pgrep finds nothing (exitCode !==
-    // 0), unlike every other kind below where a non-zero exit means "leave
-    // the last known value alone" -- handled before the generic guard for
-    // the same reason "account" is (a query that legitimately reports
-    // "not found" via its own exit code, not a transient failure to hide).
+    // daemonPid resets to 0 when pgrep finds nothing, unlike every other
+    // kind (where a nonzero exit just leaves the last known value alone) --
+    // handled here, before the generic guard, for the same reason "account" is.
     if (kind === "daemonPid") {
       daemonPid = exitCode === 0 ? (parseInt(String(raw || "").split("\n")[0], 10) || 0) : 0
       return
@@ -571,27 +480,13 @@ Item {
     return _enqueueAction(_command(action, params), label)
   }
 
-  // S10: shared by _startNextAction() and login() (which bypasses the queue
-  // entirely, exactly like before this rework -- only how the process is
-  // armed changed). `secret`, when non-empty, is written to actionProcess's
-  // stdin and cleared on `onStarted` (see the Process below), never here.
-  //
-  // N1 (25-fable-review-s10.md): `onStarted` below always closes stdin
-  // (`stdinEnabled = false`) once a process starts, but nothing was ever
-  // setting it back to `true` -- every action after the very first one in
-  // the object's lifetime armed a process whose `stdinEnabled` was still
-  // `false` from the PREVIOUS action, so a `write()` in a later `onStarted`
-  // (e.g. a `login()` that follows a `connect()`) silently went nowhere.
-  // This is the `22-login-stdin-bug.md` regression again, at the QML level
-  // this time instead of bash's. Reset it here, before `running = true`,
-  // exactly like every other per-arm reset in this function (label,
-  // secret, command).
+  // Shared by _startNextAction() and login() (which bypasses the queue).
+  // stdinEnabled is reset true here, at arm time -- onStarted always closes
+  // it after use, so a later action's write() would otherwise land nowhere.
   function _armAction(command, label, secret) {
-    // C4 (12-fable-review.md): stop the "clear actionStatus" timer before
-    // arming the next action's label -- otherwise a timer started by the
-    // PREVIOUS action's completion (e.g. "Selecting location complete") can
-    // still be ticking when this one sets "Connecting…", and 2.5s later
-    // blanks actionStatus out from under a still-busy queue.
+    // Stop the "clear actionStatus" timer before arming the next label --
+    // otherwise a timer from the PREVIOUS action's completion can still
+    // fire later and blank actionStatus out from under a busy queue.
     actionStatusTimer.stop()
     _resetActionOutput()
     _actionGen = _actionGen + 1
@@ -649,13 +544,9 @@ Item {
       secret = ""
       return
     }
-    // S10 (22-login-stdin-bug.md fix, this time at the mechanism level): no
-    // wrapper, no backgrounded shell job, so bash's "backgrounded command
-    // gets /dev/null as stdin" bug cannot recur -- Process.write() reaches
-    // the child's real stdin directly (measured, scratchpad/pm-native).
-    // _armAction hands `secret` to actionProcess.secret; onStarted below
-    // writes it, clears it, and closes stdin (EOF) before this function
-    // returns control to the caller.
+    // No wrapper, no backgrounded shell job: a backgrounded command gets
+    // /dev/null as stdin, but Process.write() reaches this child's real
+    // stdin directly. _armAction hands `secret` over; onStarted writes it.
     _armAction(command, "Logging in", secret)
     secret = ""
   }
@@ -757,21 +648,9 @@ Item {
     _runAction("excludedPidDelete", { pid: pid }, "Removing excluded process")
   }
 
-  // T2 (16-s8-feedback-spec.md): the network update check. Deliberately its
-  // OWN Process (updateCheckProcess below), not the shared readProcess/
-  // _readQueue pipeline every other read uses -- `checkupdates` can block
-  // for up to its own 120s timeout, and readProcess/_readQueue feed
-  // `busy`, which gates connectTunnel()/disconnectTunnel()/toggleTunnel().
-  // Routing an hourly background network check through that same queue
-  // would make a slow/hung update check block the user from toggling the
-  // VPN for up to two minutes -- a regression this pass does not want to
-  // introduce. Debounced: a call is ignored while one is already running,
-  // or within 60s of the last one that was started (see the note on
-  // _updateCheckAttemptedAt vs updateCheckedAt just below).
-  // Debounced on the last ATTEMPT (`_updateCheckAttemptedAt`), not the last
-  // successful completion (`updateCheckedAt`, which only advances on exit 0
-  // so the UI can show "last known result"): an offline box therefore
-  // cannot re-run `checkupdates` more than once a minute from "Check now".
+  // The network update check runs on its own Process, never the shared
+  // read queue that gates `busy` -- a slow/hung checkupdates must not block
+  // toggling the VPN. Debounced on the last ATTEMPT, not last success.
   function checkForUpdates() {
     // Nothing installed => nothing to check. Refuse instead of letting
     // checkupdates "confirm" an up-to-date package that does not exist.
@@ -784,20 +663,17 @@ Item {
       _updateCheckGen = _updateCheckGen + 1
       updateCheckWatchdog.interval = root.updateCheckTimeoutMs
       updateCheckWatchdog.restart()
-      // S10: updateCheckScript stays a direct (unwrapped) bash script child
-      // -- it wraps `checkupdates`, not the Mullvad CLI, so it is outside
-      // this rework's scope (spec: "bash stays"). No bounded-command layer
-      // either way; the watchdog above is this process's only deadline now.
+      // updateCheckScript stays a direct bash-script child -- it wraps
+      // checkupdates, not the Mullvad CLI. The watchdog above is its only deadline.
       updateCheckProcess.command = [updateCheckScript]
       updateCheckProcess.running = true
     }
     return updateCheckStatus
   }
 
-  // F6 (D9 fix): interval assigned imperatively, never live-bound. A live
-  // `interval: expr` binding restarts the countdown on any change to the
-  // expression's inputs; this timer only needs to react to actual
-  // pollInterval pushes from the widget (below), never to its own ticks.
+  // interval assigned imperatively, never live-bound -- a live binding
+  // restarts the countdown on any change to its own inputs, which this
+  // timer must not do on its own ticks.
   Timer {
     id: pollTimer
     repeat: true
@@ -833,13 +709,9 @@ Item {
     onTriggered: root._enqueueRead("excludedPids", ["mullvad", "split-tunnel", "list"])
   }
 
-  // T2: the human's rule (15-humand-feedback.md) -- "low refresh, at most
-  // once every hour[)". Imperative interval, same reasoning as pollTimer
-  // (F6/D9): never a live `interval:` binding. First run at 60s after
-  // service start (fast enough to populate the System tab without a
-  // network check on every single startup being the FIRST thing that
-  // happens), then every hour. checkForUpdates() is itself debounced, so
-  // this is also what the tab's "Check now" button calls directly.
+  // At most once an hour, imperative interval like pollTimer. First run at
+  // 60s so the System tab populates without a network check on startup;
+  // checkForUpdates() is itself debounced, and also what "Check now" calls.
   Timer {
     id: systemTimer
     repeat: true
@@ -852,14 +724,9 @@ Item {
     Component.onCompleted: interval = 60000
   }
 
-  // S10: readWatchdog/readKillTimer -- pattern measured live
-  // (scratchpad/pm-native/probe/shell.qml) and modeled on github-status's
-  // probeWatchdog (Service.qml there, grep probeWatchdogFired): on fire,
-  // SIGTERM first (`signal(15)`), then a 1s killTimer escalates to
-  // SIGKILL (`signal(9)`) if the child is still alive -- `running = false`
-  // on its own only sends TERM again (measured: probe A), so it would not
-  // actually escalate anything if used here instead. Same-tick guard reads
-  // `readProcess.running` directly (skill gotcha #1), never a derived bool.
+  // On fire: SIGTERM first, then a 1s killTimer escalates to SIGKILL if the
+  // child is still alive (`running = false` alone only re-sends TERM).
+  // Same-tick guard reads `readProcess.running` directly, never a derived bool.
   Timer {
     id: readWatchdog
     repeat: false
@@ -877,21 +744,17 @@ Item {
     id: readKillTimer
     interval: 1000
     repeat: false
-    // N2: only escalate against the SAME process this timer was armed for
-    // -- `readProcess.processId` at fire time might belong to a DIFFERENT
-    // (later) child if the one that triggered the watchdog already exited
-    // and the queue started the next read before this timer fired.
+    // Only escalate against the SAME process this timer was armed for --
+    // by fire time the queue may already have started a different child
+    // if the one that triggered the watchdog already exited.
     onTriggered: {
       if (readProcess.running && readProcess.processId === root._readArmedPid) readProcess.signal(9)
     }
   }
 
-  // S12: shared by the real onExited below and the synthetic failed-start
-  // path (readProcess's onRunningChanged, further down) -- exitStatus===1
-  // (CrashExit, killed by signal) is folded into a nonzero exitCode
-  // regardless of exitCode; a synthetic failed-start call passes
-  // exitStatus 0 (its exitCode 127 alone is already nonzero, and no real
-  // QProcess::ExitStatus applies since the child never actually ran).
+  // Shared by the real onExited and the synthetic failed-start path below.
+  // exitStatus === 1 (killed by signal) folds into a nonzero exit code
+  // regardless of exitCode, so a signalled child never reads as success.
   function _readFinalize(exitCode, exitStatus, syntheticError) {
     readWatchdog.stop()
     readKillTimer.stop()
@@ -918,16 +781,9 @@ Item {
     command: []
     running: false
     onStarted: { root._readArmedPid = processId }
-    // S12: Quickshell flips `running` to false without ever emitting
-    // `exited` when the binary itself cannot be found (measured,
-    // scratchpad/s12/) -- `Qt.callLater` defers this check to the next
-    // event-loop turn so a NORMAL exit's own `exited` handler (which also
-    // flips `running`, and runs synchronously before any queued
-    // `callLater`) has already stamped `_readExitedGen` first, making this
-    // a no-op in that case. `gen` is captured NOW (synchronously), not read
-    // fresh inside the callback -- seeing _readGen or _readExitedGen out of
-    // this file: `_readGen`'s comment above explains why a plain boolean
-    // isn't safe here.
+    // Quickshell flips `running` false without ever emitting `exited` when
+    // the binary can't be found. `Qt.callLater` defers this check so a
+    // normal exit's own (synchronous) `exited` handler runs first.
     onRunningChanged: {
       if (!running) {
         var gen = root._readGen
@@ -953,21 +809,9 @@ Item {
     }
   }
 
-  // F2 (D2 fix): spawned as a DIRECT Process child, no bounded-command
-  // wrapper. Quickshell's `quickshell kill` hard-kills only its immediate
-  // child; a wrapped grandchild never receives that signal and is
-  // reparented to systemd --user on every shell restart (06-verdict.md D2,
-  // reproduced live in 09-s5-migration.md). The per-line size cap that the
-  // wrapper's now-removed `listen` mode used to enforce is kept here in
-  // QML instead (`listenerLineChars`, applied to every line in both
-  // onRead handlers below) so output is still bounded.
-  //
-  // Residual risk (documented, not fixed by this change): an ungraceful
-  // SIGKILL of the quickshell process itself (not the graceful
-  // `quickshell kill` IPC omarchy-restart-shell uses) can still orphan
-  // this direct child, exactly like any orphaned child of any killed
-  // process. It self-terminates on its next write once its stdout pipe's
-  // read end is gone (EPIPE) rather than running forever.
+  // A direct Process child, never a wrapper -- `quickshell kill` only
+  // hard-kills its immediate child, so a wrapped grandchild would leak on
+  // every shell restart. See docs/developers.md, "Why no shell wrapper".
   Process {
     id: listenerProcess
     command: ["mullvad", "status", "--json", "listen"]
@@ -997,7 +841,7 @@ Item {
     }
   }
 
-  // S10: same pattern as readWatchdog/readKillTimer above.
+  // Same pattern as readWatchdog/readKillTimer above.
   Timer {
     id: actionWatchdog
     repeat: false
@@ -1015,7 +859,7 @@ Item {
     id: actionKillTimer
     interval: 1000
     repeat: false
-    // N2: same guard as readKillTimer above.
+    // Same guard as readKillTimer above.
     onTriggered: {
       if (actionProcess.running && actionProcess.processId === root._actionArmedPid) actionProcess.signal(9)
     }
@@ -1028,20 +872,9 @@ Item {
     command: []
     running: false
     stdinEnabled: true
-    // N3 (25-fable-review-s10.md): `secret` otherwise lingers in memory if
-    // the process never actually starts (e.g. the executable fails to
-    // spawn at all -- no onStarted fires, but `running` still flips back to
-    // false). Cleared here on every transition to not-running, and again in
-    // onExited below as a second, redundant guard for the same lifetime
-    // event (harmless if onRunningChanged already cleared it).
-    //
-    // S12 (28-s12-failed-start-spec.md): same handler also carries the
-    // synthetic-failed-start guard shared with readProcess/updateCheckProcess
-    // above/below -- a single Process may only declare one onRunningChanged.
-    // Without this, an action whose binary vanished left `actionStatus`
-    // stuck at "<label>…" forever (no `onExited` ever ran to overwrite it)
-    // and never called `refreshAll()`, so `installed`/`daemonRunning` never
-    // re-checked either.
+    // Clears `secret` even if the process never starts at all (no onStarted
+    // fires). Also carries the synthetic failed-start guard shared with
+    // readProcess/updateCheckProcess -- a Process allows only one handler.
     onRunningChanged: {
       if (!running) {
         secret = ""
@@ -1054,13 +887,9 @@ Item {
         })
       }
     }
-    // 22-login-stdin-bug.md fix at the mechanism level: Process.write()
-    // reaches the child's real stdin directly (no backgrounded shell job to
-    // silently substitute /dev/null). Every action closes stdin via EOF
-    // right after start -- not just login -- since no action here reads
-    // further stdin once started; measured live (scratchpad/pm-native probe
-    // C): write() then stdinEnabled = false delivers EOF, a following read
-    // sees 0 bytes.
+    // Process.write() reaches the child's real stdin directly -- no
+    // backgrounded shell job to silently substitute /dev/null. Every action
+    // closes stdin via EOF right after start, since none reads further.
     onStarted: {
       root._actionArmedPid = processId
       if (secret.length > 0) {
@@ -1083,14 +912,12 @@ Item {
     }
   }
 
-  // S12: shared by actionProcess's real onExited and its synthetic
-  // failed-start path above (see _readFinalize's comment for why the
-  // shared-helper shape). `syntheticError`, when set, always means the
-  // binary never started at all.
+  // Shared by actionProcess's real onExited and its synthetic failed-start
+  // path above. `syntheticError`, when set, means the binary never started.
   function _actionFinalize(exitCode, exitStatus, syntheticError) {
     actionWatchdog.stop()
     actionKillTimer.stop()
-    actionProcess.secret = "" // N3: redundant with onRunningChanged above, belt-and-suspenders.
+    actionProcess.secret = "" // redundant with onRunningChanged above, belt-and-suspenders.
     var label = actionProcess.label
     var success = false
     if (syntheticError) {
@@ -1125,11 +952,9 @@ Item {
     if (success) Qt.callLater(root._startNextAction)
   }
 
-  // S10: same pattern again. updateCheckScript already enforces its own
-  // internal timeout (MULLVAD_UPDATE_CHECK_TIMEOUT, test/scripts.test.sh),
-  // so this watchdog is a backstop for the script hanging outright, not the
-  // primary deadline -- 130s, matching the removed bounded-command call's
-  // own timeout argument.
+  // Same watchdog pattern again. updateCheckScript enforces its own
+  // internal timeout already, so this is a backstop for the script hanging
+  // outright, not the primary deadline.
   Timer {
     id: updateCheckWatchdog
     repeat: false
@@ -1147,32 +972,24 @@ Item {
     id: updateCheckKillTimer
     interval: 1000
     repeat: false
-    // N2: same guard as readKillTimer above.
+    // Same guard as readKillTimer above.
     onTriggered: {
       if (updateCheckProcess.running && updateCheckProcess.processId === root._updateCheckArmedPid) updateCheckProcess.signal(9)
     }
   }
 
-  // T2: deliberately separate from readProcess/actionProcess -- see the
-  // comment on checkForUpdates() above. Not counted in `busy`.
-  // S12: shared by updateCheckProcess's real onExited and its synthetic
-  // failed-start path below. A synthetic call always reaches the final
-  // `else` (nonzero effectiveExitCode) branch below, same as any other
-  // nonzero exit -- `scripts/mullvad-update-check` failing to spawn at all
-  // is just as "inconclusive" as it timing out or being killed for
-  // overflow, so no separate syntheticError branch is needed here (unlike
-  // _readFinalize/_actionFinalize, which surface distinct error text).
+  // Deliberately separate from readProcess/actionProcess; not counted in
+  // `busy`. A synthetic failed-start call always reaches the final nonzero-
+  // exit branch below, same as timing out or being killed for overflow.
   function _updateCheckFinalize(exitCode, exitStatus) {
     updateCheckWatchdog.stop()
     updateCheckKillTimer.stop()
     var timedOutOrOverflowed = root._updateCheckWatchdogFired || root._updateCheckOverflowed
     root._updateCheckWatchdogFired = false
     if (timedOutOrOverflowed) {
-      // scripts/mullvad-update-check exit 3 (offline/lock/timeout): "does
-      // nothing" per the human's rule -- only the status flips so the UI
-      // can say so; updateAvailable/updateTargets/updateCheckedAt are
-      // left exactly as they were. A watchdog/overflow kill is treated
-      // the same way: inconclusive, not a parse-worthy result.
+      // Offline/lock/timeout (exit 3) or a watchdog/overflow kill: only the
+      // status flips so the UI can say so; updateAvailable/updateTargets/
+      // updateCheckedAt are left exactly as they were.
       root.updateCheckStatus = "unavailable"
       return
     }
@@ -1197,11 +1014,9 @@ Item {
     command: []
     running: false
     onStarted: { root._updateCheckArmedPid = processId }
-    // S12: same synthetic-failed-start guard as readProcess/actionProcess
-    // above -- `scripts/mullvad-update-check` (a bash script, not the
-    // Mullvad CLI) can just as easily fail to spawn if e.g. its own
-    // interpreter disappears; without this, updateCheckStatus stayed
-    // stuck at "checking" forever.
+    // Same synthetic-failed-start guard as readProcess/actionProcess --
+    // without it, a script whose interpreter disappeared left
+    // updateCheckStatus stuck at "checking" forever.
     onRunningChanged: {
       if (!running) {
         var gen = root._updateCheckGen
