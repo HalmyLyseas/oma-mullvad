@@ -241,6 +241,31 @@ AI-agent-clause attestation — needs explicit human approval and is never
 filed by an agent. Updates after listing go through a `verify-plugin.yml`
 issue naming the plugin ID, repo URL, and full 40-character commit SHA.
 
+## Upstreaming
+
+This fork's identity/layout commits (own manifest `id`/`author`, own
+marketplace listing, the S1-S8 architecture-migration history) are not PR
+material upstream — they are this fork's own divergence, not a fix. The
+PR-able change set is: F1/F2 (D1/D2 — the service-singleton split and the
+unwrapped direct-child listener), F3-F6 (`parseToggle` line-anchoring, the
+argv leading-`-`/path-traversal rejection, rendering `actionStatus`, the
+imperative `Timer.interval` fix), C1 (the `lockedDown`
+present-vs-`undefined` fix), C4 (`actionStatusTimer.stop()` before arming
+the next action), and now T1/T2 (the safe package-page link, the System
+tab). Each is a real, reproducible bug fix or a policy-clean addition, not
+fork-specific rebranding.
+
+To upstream: cherry-pick the specific commits above onto upstream `main`
+(remote `upstream`, i.e. `kallupx/oma-mullvad`) using the **upstream**
+manifest id (`io.github.kallupx.oma-mullvad`), not this fork's
+`halmylyseas.mullvad` — one PR per concern (do not bundle unrelated fixes
+into a single PR), and only after explicit human approval before anything
+is pushed to a fork of `kallupx/oma-mullvad` or a PR is filed. No PR has
+been prepared or filed as part of this pass; this section is preparation
+only.
+
 ## Credits
+
+Author: kallupx (upstream OmaMullvad). Fork maintained by HalmyLyseas.
 
 Forked from [kallupx/oma-mullvad](https://github.com/kallupx/oma-mullvad).

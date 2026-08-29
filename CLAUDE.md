@@ -11,6 +11,8 @@ diverge on identity and house rules (own marketplace listing, AUR-install
 button removed) while staying upstreamable: fixes here are meant to be
 PR-able back to kallupx where they apply.
 
+Author: kallupx (upstream OmaMullvad). Fork maintained by HalmyLyseas.
+
 ## Architecture
 
 `manifest.json` declares kinds `service` + `bar-widget`. `Service.qml` is a

@@ -74,6 +74,8 @@ read-only against the real Mullvad CLI.
 
 ## Credits
 
+Author: kallupx (upstream OmaMullvad). Fork maintained by HalmyLyseas.
+
 Forked from [kallupx/oma-mullvad](https://github.com/kallupx/oma-mullvad), the
 original OmaMullvad plugin. This fork keeps its upstream history (`upstream`
 remote) and intends to upstream fixes back via PR where they apply.
