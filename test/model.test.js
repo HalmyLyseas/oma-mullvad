@@ -32,11 +32,9 @@ test("status JSON and listen events normalize connection details", () => {
     assert.equal(status.location.entryHostname, "se-sto-wg-001");
     assert.equal(status.lockedDown, true);
 
-    // C1 (12-fable-review.md): `locked_down` is only present on the
-    // `disconnected` TunnelState variant. When neither `details.locked_down`
-    // nor `value.locked_down` is a boolean, lockedDown must be `undefined`
-    // (not coerced to false) so Service.qml's `!== undefined` guard actually
-    // leaves the last known lockdown state alone instead of clobbering it.
+    // `locked_down` is only present on the `disconnected` TunnelState
+    // variant; when neither field is a boolean, lockedDown must stay
+    // `undefined` so Service.qml's guard leaves the last known state alone.
     assert.equal(Model.parseStatus({
         state: "connected",
         details: { location: { country: "Finland", city: "Helsinki" } }
@@ -162,9 +160,8 @@ test("toggles and DNS getter/default/custom commands round-trip supported settin
     assert.equal(Model.parseToggle("Lockdown mode: on"), true);
     assert.equal(Model.parseToggle("Local network sharing: block"), false);
     assert.equal(Model.parseToggle("unknown"), null);
-    // F3 (D3 fix): a trailing hint/help line must never override the value
-    // that actually followed the first "key:" -- the line-anchored match
-    // wins over the old last-match-anywhere fallback.
+    // A trailing hint/help line must never override the value that
+    // actually followed the first "key:".
     assert.equal(Model.parseToggle("Autoconnect: on\nHint: … off by default"), true);
 
     const dns = Model.parseDns(`Custom DNS: yes
@@ -206,10 +203,9 @@ lwo settings: any port`);
 });
 
 test("T2: parseCliVersion/parseDaemonVersion match real mullvad CLI output shapes", () => {
-    // Recorded live on this box (16-s8-feedback-spec.md PM research):
-    // `mullvad --version` -> "mullvad-cli 2026.4"; `mullvad version` ->
-    // the 3-line "Current version / Is supported / Suggested upgrade"
-    // report (with real-world padding before the colon).
+    // `mullvad --version` -> "mullvad-cli 2026.4"; `mullvad version` -> the
+    // 3-line "Current version / Is supported / Suggested upgrade" report
+    // (with real-world padding before the colon).
     assert.equal(Model.parseCliVersion("mullvad-cli 2026.4\n"), "2026.4");
     assert.equal(Model.parseCliVersion(""), "");
 
@@ -322,17 +318,14 @@ test("argv builder covers tunnel, relay, anti-censorship, and exclusions", () =>
     assert.throws(() => Model.argv("antiCensorshipPort", { mode: "udp2tcp", port: 70000 }), /port/);
     assert.throws(() => Model.argv("launchExcluded", { desktopId: "x; reboot" }), /application/);
 
-    // F4 (D5 fix): a leading "-" must never reach argv-bound values --
-    // safeArg() rejects it directly (providers is one of its callers), and
-    // launchExcluded's desktop-id regex independently requires the string
-    // to start with an alphanumeric.
+    // A leading "-" must never reach argv-bound values -- safeArg() rejects
+    // it directly, and launchExcluded's own regex requires an alphanumeric start.
     assert.throws(() => Model.argv("providers", { providers: ["-x"] }), /provider/);
     assert.throws(() => Model.argv("launchExcluded", { desktopId: "-firefox.desktop" }), /application/);
     assert.throws(() => Model.argv("launchExcluded", { desktopId: ".firefox.desktop" }), /application/);
     assert.throws(() => Model.argv("launchExcluded", { desktopId: "_firefox.desktop" }), /application/);
-    // F4: dot-separated "." / ".." segments (path-traversal-shaped) are
-    // rejected even when the string otherwise starts with an alphanumeric
-    // and would pass the base charset check.
+    // Dot-separated "." / ".." segments (path-traversal shaped) are
+    // rejected even when the string otherwise passes the base charset check.
     assert.throws(() => Model.argv("launchExcluded", { desktopId: "org...mozilla.desktop" }), /application/);
     assert.throws(() => Model.argv("launchExcluded", { desktopId: "org.mozilla.." }), /application/);
     // Ordinary reverse-DNS desktop IDs (the only real-world shape) still work.

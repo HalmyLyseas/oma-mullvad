@@ -117,16 +117,9 @@ function parseStatus(raw) {
             entryHostname: validateHostname(entryHostname) ? entryHostname : "",
             mullvadExitIp: location.mullvad_exit_ip === true
         },
-        // C1 (12-fable-review.md): Mullvad's `TunnelState` only carries
-        // `locked_down` in the `disconnected` variant -- every other variant
-        // (connected/connecting/disconnecting/error) has no such field at
-        // all. Returning a strict boolean here made a *missing* field read
-        // as `false`, so `Service.qml`'s `parsed.lockedDown !== undefined`
-        // guard never actually skipped -- every connected-state poll or
-        // listener event silently forced the UI's `lockdown` property back
-        // to false even when lockdown mode was on. Only report a boolean
-        // when the payload actually contained one; otherwise `undefined` so
-        // the caller's guard leaves the last known value alone.
+        // `TunnelState` only carries `locked_down` in the `disconnected`
+        // variant. Report a boolean only when present; otherwise `undefined`,
+        // so Service.qml's `!== undefined` guard keeps the last known value.
         lockedDown: typeof details.locked_down === "boolean" ? details.locked_down
             : typeof value.locked_down === "boolean" ? value.locked_down : undefined
     };
@@ -506,13 +499,9 @@ function parseAccount(raw, nowMs) {
 }
 
 function parseToggle(raw) {
-    // F3 (D3 fix): try the value right after the first "key:" line first --
-    // anchored so trailing hint/help text on a later line (e.g. "Autoconnect:
-    // on\nHint: ... off by default") can never flip the result. Only if that
-    // fails do we fall back to the old "last on/off-ish word anywhere" scan,
-    // which existing callers rely on for bare single-word values (e.g.
-    // parseDns splitting "Block ads: true" into key/value before calling
-    // this with just "true").
+    // Try the value right after the first "key:" line first, anchored so a
+    // trailing hint line can never flip the result. Fall back to the last
+    // on/off-ish word anywhere, for callers passing a bare single word.
     var input = boundedInput(raw, 4096);
     var lineMatch = input.match(/^[^:\n]*:\s*(on|off|enabled|disabled|allow|block|true|false|yes|no)\b/im);
     if (lineMatch)
@@ -597,9 +586,9 @@ function parseExcludedPids(raw) {
     return result;
 }
 
-// T2 (16-s8-feedback-spec.md): System-tab parsers. All bounded, all
-// tolerant of missing/malformed input (return empty/neutral values rather
-// than throw), matching the rest of this file's style.
+// System-tab parsers. All bounded, all tolerant of missing/malformed input
+// (return empty/neutral values rather than throw), matching the rest of
+// this file's style.
 
 var SYSTEM_PACKAGE_NAMES = { "mullvad-vpn": true, "mullvad-vpn-daemon": true };
 
@@ -610,11 +599,9 @@ function parseCliVersion(raw) {
     return match ? plainText(match[1], 32) : "";
 }
 
-// Parses `mullvad version` (queries the running daemon -- NOT the same as
-// `mullvad-daemon --version`), a 3-line report:
-//   Current version       : 2026.4
-//   Is supported          : true
-//   Suggested upgrade     : none
+// Parses `mullvad version` (queries the running daemon, not the same as
+// `mullvad-daemon --version`): a 3-line "Current version / Is supported /
+// Suggested upgrade" report.
 function parseDaemonVersion(raw) {
     var input = boundedInput(raw, 4096);
     var version = input.match(/^\s*Current version\s*:\s*(.+?)\s*$/im);
@@ -757,11 +744,9 @@ function validateDnsAddress(value) {
 
 function safeArg(value, label) {
     var result = text(value);
-    // F4 (D5 fix): a leading "-" would let a relay-derived/user-writable
-    // value be read as a flag by whatever argv-bound binary receives it
-    // (inert today only because the reachable binaries happen to treat an
-    // unknown flag as a no-op) -- reject it at the source instead of
-    // depending on that.
+    // A leading "-" would let a relay-derived/user-writable value be read
+    // as a flag by whatever argv-bound binary receives it -- reject it at
+    // the source instead of depending on the binary ignoring it.
     if (!result || result.length > 512 || /[\x00\r\n]/.test(result) || /^-/.test(result))
         throw new Error("Invalid " + label);
     return result;
@@ -893,10 +878,9 @@ function argv(action, params) {
     case "excludedPidDelete": return ["mullvad", "split-tunnel", "delete", pidArg(params.pid)];
     case "launchExcluded": {
         var desktopId = safeArg(params.desktopId, "desktop application ID");
-        // F4 (D5 fix): must start with an alphanumeric (no leading "-"/"."/
-        // "_"), and no dot-separated segment may be exactly "." or ".."
-        // (path-traversal-shaped segment), on top of safeArg's own
-        // leading-"-" rejection above.
+        // Must start with an alphanumeric, and no dot-separated segment may
+        // be exactly "." or ".." (path-traversal shaped), on top of
+        // safeArg's own leading-"-" rejection above.
         if (!/^[a-z0-9][a-z0-9_.+\-]*(?:\.desktop)?$/i.test(desktopId) || /(^|\.)\.\.?(\.|$)/.test(desktopId))
             throw new Error("Invalid desktop application ID");
         return ["mullvad-exclude", "uwsm-app", "--", "gtk-launch", desktopId];
