@@ -79,16 +79,33 @@ arrayField() {
 
 # Same orphan-kill convention as test/probe/run: any mock PID this run's
 # log recorded that is still alive after `qs` exited is a leaked process.
+# Alive means present AND not a zombie: in a container without an init to
+# reap children, a mock that died with qs lingers as "Z" and kill -0 still
+# succeeds. Give a real straggler up to 2 s to finish exiting first.
+alive() {
+  local pid="$1" state
+  state="$(awk '{print $3}' "/proc/$pid/stat" 2>/dev/null)" || return 1
+  [[ -n "$state" && "$state" != "Z" && "$state" != "X" ]]
+}
+settled_alive() {
+  local pid="$1" i
+  for i in 1 2 3 4 5 6 7 8 9 10; do
+    alive "$pid" || return 1
+    sleep 0.2
+  done
+  return 0
+}
+
 check_no_orphans() {
   local mocklog="$1" label="$2"
   local pids leaked=0
   pids="$(grep -oP '^PID=\K[0-9]+' "$mocklog" 2>/dev/null | sort -u)"
   for pid in $pids; do
-    if kill -0 "$pid" 2>/dev/null; then
+    if settled_alive "$pid"; then
       leaked=1
       kill -TERM "$pid" 2>/dev/null || true
       sleep 0.2
-      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+      alive "$pid" && kill -9 "$pid" 2>/dev/null || true
       echo "  orphan: PID $pid was still alive after qs exited (killed by test/probe/run-ui)"
     fi
   done
