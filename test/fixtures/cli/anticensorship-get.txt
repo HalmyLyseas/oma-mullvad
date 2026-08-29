@@ -1,0 +1,5 @@
+mode: auto
+udp2tcp settings: any port
+shadowsocks settings: any port
+wireguard-port settings: any port
+lwo settings: any port

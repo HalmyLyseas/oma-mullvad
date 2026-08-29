@@ -1,0 +1,209 @@
+#!/usr/bin/env bash
+# test/probe/run -- deterministic mock-CLI probe suite for the S10 Process
+# rework (exchange/23-s10-native-process-spec.md). Runs
+# test/probe/service-probe.qml once per MULLVAD_MOCK_MODE (ok/hang/flood/
+# fail) via `qs -n -p ...` with PATH shadowed so every `mullvad` invocation
+# resolves to test/mocks/mullvad -- NEVER the real daemon (no Wayland IPC to
+# a running shell is touched; `qs -n` is a standalone, throwaway QML engine
+# instance). Skips with a notice (exit 0) if no `qs` binary / Wayland
+# session is available, per this project's test/all convention.
+#
+# Output goes to files (never a pipe -- block-buffering under `qs` swallows
+# console.log otherwise, navi-omarchy-plugin-dev skill).
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+OUT_DIR="$(mktemp -d)"
+trap 'rm -rf "$OUT_DIR"' EXIT
+
+fail_count=0
+pass_count=0
+ok() { pass_count=$((pass_count + 1)); echo "ok - $1"; }
+not_ok() { fail_count=$((fail_count + 1)); echo "NOT OK - $1"; }
+
+if ! command -v qs >/dev/null 2>&1; then
+  echo "test/probe/run: no \`qs\` on PATH (no Wayland session?) -- skipping mock probe suite"
+  exit 0
+fi
+
+run_mode() {
+  local mode="$1"
+  local log="$OUT_DIR/$mode.log"
+  local mocklog="$OUT_DIR/$mode.mock.log"
+  : > "$mocklog"
+  MULLVAD_MOCK_MODE="$mode" MULLVAD_MOCK_LOG="$mocklog" \
+    MULLVAD_PLUGIN_DIR="$PLUGIN_DIR" \
+    PATH="$PLUGIN_DIR/test/mocks:$PATH" \
+    timeout 30 qs -n -p "$PLUGIN_DIR/test/probe/service-probe.qml" > "$log" 2>&1
+  echo "$?" > "$OUT_DIR/$mode.exit"
+  echo "$log"
+}
+
+json_line() { grep -o 'PROBE_RESULT .*' "$1" | tail -n1 | sed 's/^PROBE_RESULT //'; }
+
+field() {
+  # field <json> <key> -- deterministic single flat object, node available
+  # everywhere this repo's tests already require node.
+  node -e '
+    try {
+      const data = JSON.parse(process.argv[1]);
+      const v = data[process.argv[2]];
+      process.stdout.write(v === undefined || v === null ? "" : String(v));
+    } catch (e) { process.stdout.write(""); }
+  ' "$1" "$2"
+}
+
+# Kills any mock PID that (a) this run's mock log recorded and (b) is still
+# alive after the qs process exited -- an orphan by definition, and counted
+# as a failure regardless of what else passed (never silently swept aside).
+check_no_orphans() {
+  local mocklog="$1" label="$2"
+  local pids leaked=0
+  pids="$(grep -oP '^PID=\K[0-9]+' "$mocklog" 2>/dev/null | sort -u)"
+  for pid in $pids; do
+    if kill -0 "$pid" 2>/dev/null; then
+      leaked=1
+      kill -TERM "$pid" 2>/dev/null || true
+      sleep 0.2
+      kill -0 "$pid" 2>/dev/null && kill -9 "$pid" 2>/dev/null || true
+      echo "  orphan: PID $pid was still alive after qs exited (killed by test/probe/run)"
+    fi
+  done
+  if [[ $leaked -eq 1 ]]; then
+    not_ok "$label: no orphaned mock process left behind"
+  else
+    ok "$label: no orphaned mock process left behind"
+  fi
+}
+
+login_received_len() {
+  grep -o 'login-received-len=[0-9]*' "$1" | tail -n1 | cut -d= -f2
+}
+
+echo "== ok mode =="
+log="$(run_mode ok)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/ok.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "ok: probe printed a PROBE_RESULT line"
+  cat "$log"
+else
+  ok "ok: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" installed)" == "true" ]] && ok "ok: installed=true" || not_ok "ok: installed=true (got: $json)"
+  [[ "$(field "$json" daemonRunning)" == "true" ]] && ok "ok: daemonRunning=true" || not_ok "ok: daemonRunning=true"
+  [[ -z "$(field "$json" lastError)" ]] && ok "ok: lastError empty" || not_ok "ok: lastError empty (got: $(field "$json" lastError))"
+  loc="$(field "$json" locationsLength)"
+  [[ "${loc:-0}" -gt 0 ]] && ok "ok: relay locations parsed ($loc)" || not_ok "ok: relay locations parsed (got $loc)"
+  recv="$(login_received_len "$mocklog")"
+  [[ "$recv" == "16" ]] && ok "ok: mock received exactly 16 stdin chars for login" \
+    || not_ok "ok: mock received exactly 16 stdin chars for login (got: ${recv:-<none>})"
+  [[ "$(field "$json" actionStatus)" == "Logging in complete" ]] && ok "ok: login action completed" \
+    || not_ok "ok: login action completed (got: $(field "$json" actionStatus))"
+  note="$(field "$json" note)"
+  [[ -z "$note" ]] && ok "ok: no harness-level note/timeout" || not_ok "ok: no harness-level note/timeout (got: $note)"
+fi
+check_no_orphans "$mocklog" "ok"
+
+echo
+echo "== fail mode =="
+log="$(run_mode fail)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/fail.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "fail: probe printed a PROBE_RESULT line"
+  cat "$log"
+else
+  ok "fail: probe printed a PROBE_RESULT line"
+  [[ "$(field "$json" installed)" == "true" ]] && ok "fail: installed=true (--version still succeeds)" \
+    || not_ok "fail: installed=true (got: $json)"
+  [[ -n "$(field "$json" lastError)" ]] && ok "fail: error surfaced (lastError non-empty)" \
+    || not_ok "fail: error surfaced (lastError non-empty)"
+  invocations="$(grep -c '^PID=' "$mocklog" 2>/dev/null || echo 0)"
+  [[ "$invocations" -gt 1 ]] && ok "fail: queue continued past the first failure ($invocations invocations)" \
+    || not_ok "fail: queue continued past the first failure (got $invocations invocations)"
+fi
+check_no_orphans "$mocklog" "fail"
+
+echo
+echo "== hang mode =="
+start_ts=$(date +%s)
+log="$(run_mode hang)"
+end_ts=$(date +%s)
+elapsed=$((end_ts - start_ts))
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/hang.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "hang: probe printed a PROBE_RESULT line"
+  cat "$log"
+else
+  ok "hang: probe printed a PROBE_RESULT line"
+  err="$(field "$json" lastError)"
+  note="$(field "$json" note)"
+  # A hung read must surface as SOME failure, never a silent stall -- the
+  # exact wording differs pre- vs post-rework (pre: the generic "not
+  # installed" text, since the old bounded-command wrapper's own timeout is
+  # what actually kills it; post: the QML watchdog's own "timed out" text),
+  # so only require non-empty here and check the precise wording only where
+  # this rework actually controls it (hasDebugCounters branch below).
+  [[ -n "$err" && -z "$note" ]] \
+    && ok "hang: read surfaced as a failure (lastError non-empty, no harness-level timeout)" \
+    || not_ok "hang: read surfaced as a failure (got err=[$err] note=[$note])"
+  hasCounters="$(field "$json" hasDebugCounters)"
+  if [[ "$hasCounters" == "true" ]]; then
+    fired="$(field "$json" readWatchdogFiredCount)"
+    [[ "${fired:-0}" -ge 1 ]] && ok "hang: readWatchdogFiredCount >= 1 ($fired)" \
+      || not_ok "hang: readWatchdogFiredCount >= 1 (got $fired)"
+    [[ "$err" == *"timed out"* ]] && ok "hang: lastError says 'timed out' ($err)" \
+      || not_ok "hang: lastError says 'timed out' (got: $err)"
+    [[ "$elapsed" -le 11 ]] && ok "hang: recovered within ~11s (${elapsed}s, short readTimeoutMs)" \
+      || not_ok "hang: recovered within ~11s (took ${elapsed}s)"
+  else
+    echo "  (pre-rework Service.qml: no debug counters yet -- recovery via scripts/bounded-command's own timeout, ${elapsed}s, not asserted tightly)"
+  fi
+fi
+check_no_orphans "$mocklog" "hang"
+
+echo
+echo "== flood mode =="
+log="$(run_mode flood)"
+json="$(json_line "$log")"
+mocklog="$OUT_DIR/flood.mock.log"
+if [[ -z "$json" ]]; then
+  not_ok "flood: probe printed a PROBE_RESULT line"
+  cat "$log"
+else
+  ok "flood: probe printed a PROBE_RESULT line"
+  chars="$(field "$json" readOutputChars)"
+  hasCounters="$(field "$json" hasDebugCounters)"
+  if [[ -n "$chars" ]]; then
+    # Pre-rework: the existing (unchanged by this suite) cap accounting adds
+    # a 1-char line-separator surcharge that can land 1 over the nominal cap
+    # -- a pre-existing off-by-one, not introduced here, tolerated only for
+    # the pre-rework baseline. Post-rework (hasDebugCounters=true) the S10
+    # helper is exact: strictly <= the nominal cap.
+    if [[ "$hasCounters" == "true" ]]; then
+      cap_limit=262144
+    else
+      cap_limit=262145
+    fi
+    [[ "$chars" -le "$cap_limit" ]] && ok "flood: _readOutputChars bounded at or under the cap ($chars <= $cap_limit)" \
+      || not_ok "flood: _readOutputChars bounded at or under the cap (got $chars, limit $cap_limit)"
+  else
+    echo "  (pre-rework Service.qml: _readOutputChars not exposed yet -- capping verified via wrapper head -c instead)"
+  fi
+  if [[ "$hasCounters" == "true" ]]; then
+    overflow="$(field "$json" readOverflowCount)"
+    [[ "${overflow:-0}" -ge 1 ]] && ok "flood: readOverflowCount >= 1 ($overflow)" \
+      || not_ok "flood: readOverflowCount >= 1 (got $overflow)"
+  fi
+fi
+check_no_orphans "$mocklog" "flood"
+
+echo
+if [[ "$fail_count" -eq 0 ]]; then
+  echo "test/probe/run: ALL CHECKS PASSED ($pass_count ok)"
+else
+  echo "test/probe/run: $fail_count FAILURE(S), $pass_count ok"
+fi
+exit $(( fail_count > 0 ? 1 : 0 ))

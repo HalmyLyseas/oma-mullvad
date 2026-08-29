@@ -1,0 +1,7 @@
+Custom DNS: no
+Block ads: false
+Block trackers: false
+Block malware: false
+Block adult content: false
+Block gambling: false
+Block social media: false

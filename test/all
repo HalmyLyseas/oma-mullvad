@@ -23,6 +23,11 @@ node "$SCRIPT_DIR/cli-contract.mjs"
 if [[ $? -ne 0 ]]; then overall=1; fi
 
 echo
+echo "== test/probe/run (deterministic mock-CLI probe suite, S10) =="
+bash "$SCRIPT_DIR/probe/run"
+if [[ $? -ne 0 ]]; then overall=1; fi
+
+echo
 if [[ $overall -eq 0 ]]; then
   echo "test/all: ALL SUITES PASSED"
 else
