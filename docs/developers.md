@@ -123,7 +123,10 @@ killed, not signalled gracefully. The result, reproduced live in both the PM
 verdict (`06-verdict.md` D2, using a synthetic `sleep 300` payload) and the
 S5 migration pass (`09-s5-migration.md`, using the real `mullvad ... listen`
 process): the wrapper disappears, and the bare `mullvad status --json
-listen` process is reparented to `systemd --user` (pid 1) and keeps running
+listen` process is reparented to the user's `systemd --user` instance (a
+normal per-user manager process, e.g. pid 1626 on this box — NOT system pid 1;
+`systemd --user` is what orphaned children of a user session get reparented
+to, distinct from the system-wide `systemd` at pid 1) and keeps running
 forever. Combined with D1 (one `Service.qml`/listener per monitor before
 this pass), a 2-monitor box leaked 2 of these per shell restart.
 
@@ -148,6 +151,21 @@ next write hits `EPIPE` and the `mullvad` CLI exits on its own.
 
 ## Accepted risks / known couplings
 
+- **The direct-child listener has no pre-newline buffer cap (C2,
+  `12-fable-review.md`).** Since F2, `listenerProcess` is a direct
+  `Process` child with a plain `SplitParser` on `stdout`/`stderr` —
+  `SplitParser`'s only property is `splitMarker` (the newline), so if the
+  child ever wrote an unbounded stream with no newline, `SplitParser`
+  would buffer it in full before ever calling `onRead` (`listenerLineChars`
+  only trims each line **after** it's delivered — it can't cap a buffer
+  that never delivers). Unfixable in plain QML without reintroducing a
+  wrapper process, and a wrapper is exactly what caused D2 (see above) —
+  so this is accepted, not fixed. Accepted because: the source is the
+  local, root-installed `mullvad` CLI, not untrusted/remote input; and
+  `mullvad status --json listen` emits one JSON object per line, each a
+  few hundred bytes (confirmed against this box's live output). Every
+  *finite* read/action process (everything except the listener) stays
+  capped by `scripts/bounded-command`'s own line/byte limits regardless.
 - **One `IpcHandler` per monitor.** `Panel.qml` still owns the plugin's
   `IpcHandler` (it needs the widget's `favoriteLocations`/`recentLocations`,
   which are Panel-local state persisted via `updateEntryInline`), and one
