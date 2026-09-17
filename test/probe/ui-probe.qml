@@ -181,6 +181,7 @@ ShellRoot {
           appLibraryNull: shell.appLibrary === null,
           ownService: shell.serviceFor("io.github.kallupx.oma-mullvad") === service,
           foreignServiceNull: shell.serviceFor("foreign.plugin") === null,
+          excludedMetadataCount: cataloguePanel.excludedApps().length,
           emptyText: cataloguePanel.appEmptyText
         })
       })

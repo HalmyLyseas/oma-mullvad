@@ -302,16 +302,14 @@ Panel {
   }
 
   function excludedApps() {
-    if (!bar || !bar.shell || !bar.shell.appLibrary) return []
-    var library = bar.shell.appLibrary
-    var source = library.sortedEntries("")
+    var source = DesktopEntries.applications.values || []
     var result = []
-    for (var i = 0; i < source.length; i++) {
-      var entry = source[i].entry || source[i]
+    for (var i = 0; i < source.length && i < 4096; i++) {
+      var entry = source[i]
       if (!entry) continue
       var firstWord = String(entry.execString || "").trim().split(/\s+/)[0] || ""
       var execBase = firstWord.split("/").pop()
-      if (execBase) result.push({ name: Model.plainText(library.entryName(entry), 128), execBase: execBase })
+      if (execBase) result.push({ name: Model.desktopEntryName(entry), execBase: execBase })
     }
     return result
   }

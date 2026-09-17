@@ -80,12 +80,13 @@ check "[[ \"$(field "$json" selectedPage)\" == 2 ]]" "ready panel can navigate t
 json="$(run_case excluded-groups)"
 check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" selectedPage)\" == 3 ]]" "Excluded page opens without engine errors"
 check "[[ \"$(field "$json" processCount)\" == 14 && \"$(field "$json" groupCount)\" == 1 ]]" "fourteen excluded processes render as one app group"
-check "[[ \"$(field "$json" firstLabel)\" == chromium && \"$(field "$json" firstCount)\" == 14 ]]" "group exposes the root process label and member count"
+check "[[ \"$(field "$json" firstLabel)\" == [Cc]hromium && \"$(field "$json" firstCount)\" == 14 ]]" "group exposes the root process label and member count"
 check "[[ \"$(field "$json" pageLoaded)\" == true && \"$(field "$json" pageGroupCount)\" == 1 ]]" "Excluded page receives the grouped model"
 
 json="$(run_case local-app-catalogue)"
 check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" selectedPage)\" == 3 ]]" "local application catalogue scenario loads the Excluded page"
 check "[[ \"$(field "$json" appLibraryNull)\" == true && \"$(field "$json" ownService)\" == true && \"$(field "$json" foreignServiceNull)\" == true ]]" "probe matches the scoped Omarchy 4.0.3 facade"
+check "[[ \"$(field "$json" excludedMetadataCount)\" -ge 1 ]]" "excluded-process labels use local desktop metadata"
 check "[[ \"$(field "$json" emptyText)\" == 'No installed applications match your search.' ]]" "local catalogue does not require the host app library"
 
 json="$(run_case recent-apps)"
