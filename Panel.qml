@@ -25,10 +25,17 @@ Panel {
   property var selectedLocation: null
   property var favoriteLocations: []
   property var recentLocations: []
+  property int appCatalogueRevision: 0
   property var pendingConfirmation: null
   property bool syncingSettings: false
   readonly property bool cliReady: service.installed && service.daemonRunning
   readonly property var _probePageItem: pageLoader.item
+  readonly property string appEmptyText: "No installed applications match your search."
+
+  Connections {
+    target: DesktopEntries.applications
+    function onValuesChanged() { root.appCatalogueRevision++ }
+  }
 
   function pageAvailable(index) { return index === 0 || cliReady }
 
@@ -268,13 +275,11 @@ Panel {
   }
 
   function appRows() {
-    if (!bar || !bar.shell || !bar.shell.appLibrary) return []
-    var source = bar.shell.appLibrary.sortedEntries(appQuery)
+    var revision = appCatalogueRevision
+    var source = Model.searchDesktopEntries(DesktopEntries.applications.values || [], appQuery, 30)
     var result = []
-    for (var i = 0; i < source.length && result.length < 30; i++) {
-      var entry = source[i].entry || source[i]
-      if (entry && entry.id) result.push(entry)
-    }
+    for (var i = 0; i < source.length; i++)
+      if (source[i] && source[i].id) result.push(source[i])
     return result
   }
 
@@ -365,7 +370,6 @@ Panel {
   onOpenedChanged: if (opened) {
     pageFlick.contentY = 0
     service.refreshAll()
-    if (bar && bar.shell && bar.shell.appLibrary && bar.shell.appLibrary.refreshIcons) bar.shell.appLibrary.refreshIcons()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
   Component.onCompleted: syncInlineSettings()
@@ -1477,9 +1481,7 @@ Panel {
         textFormat: Text.PlainText
         visible: excludedColumn.apps.length === 0
         width: parent.width
-        text: root.bar && root.bar.shell && root.bar.shell.appLibrary
-          ? "No installed applications match your search."
-          : "The active bar host does not expose Omarchy’s application library."
+        text: root.appEmptyText
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
@@ -1578,9 +1580,8 @@ Panel {
   component AppRow: CursorSurface {
     id: appRow
     property var app: null
-    readonly property var library: root.bar && root.bar.shell ? root.bar.shell.appLibrary : null
-    readonly property string appName: Model.plainText(library && app ? library.entryName(app) : String(app ? app.name || app.id : "Application"), 128)
-    readonly property string appDetail: Model.plainText(library && app ? library.entrySubtext(app) : "", 256)
+    readonly property string appName: Model.desktopEntryName(app) || "Application"
+    readonly property string appDetail: Model.desktopEntrySubtext(app)
 
     foreground: root.foreground
     activeFocusOnTab: true
@@ -1609,7 +1610,11 @@ Panel {
         Layout.preferredHeight: Style.space(24)
         sourceSize.width: width
         sourceSize.height: height
-        source: appRow.library && appRow.app ? appRow.library.iconSource(String(appRow.app.icon || "")) : ""
+        source: {
+          var icon = String(appRow.app && appRow.app.icon || "")
+          var resolved = icon ? Quickshell.iconPath(icon, true) : ""
+          return resolved || Quickshell.iconPath("application-x-executable", true)
+        }
         fillMode: Image.PreserveAspectFit
       }
       ColumnLayout {

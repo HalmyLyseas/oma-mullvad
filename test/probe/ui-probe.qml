@@ -10,23 +10,19 @@ ShellRoot {
   property bool finished: false
 
   QtObject {
-    id: appLibrary
-    signal appsChanged()
-    function sortedEntries(query) { return [] }
-    function entryName(entry) { return "" }
-    function entrySubtext(entry) { return "" }
-    function iconSource(icon) { return "" }
-    function refreshIcons() {}
-  }
-
-  QtObject {
     id: shell
     property var serviceInstance: null
-    readonly property var appLibrary: appLibrary
+    readonly property var appLibrary: null
+    property string lastUpdateId: ""
+    property var lastUpdatePayload: null
     function serviceFor(id) {
       return id === "io.github.kallupx.oma-mullvad" ? serviceInstance : null
     }
-    function updateEntryInline(id, entry) {}
+    function updateEntryInline(id, entry) {
+      if (id !== "io.github.kallupx.oma-mullvad") return
+      lastUpdateId = id
+      lastUpdatePayload = entry
+    }
   }
 
   QtObject {
@@ -134,6 +130,20 @@ ShellRoot {
         excludedAvailable: panel.pageAvailable(3),
         selectedPage: panel.pageIndex,
         barTooltip: widget.barTooltip
+      })
+    } else if (scenario === "local-app-catalogue") {
+      var cataloguePanel = widget._probePanelItem
+      service.installed = true
+      service.daemonRunning = true
+      cataloguePanel.showPage(3)
+      Qt.callLater(function() {
+        root.finish("", {
+          selectedPage: cataloguePanel.pageIndex,
+          appLibraryNull: shell.appLibrary === null,
+          ownService: shell.serviceFor("io.github.kallupx.oma-mullvad") === service,
+          foreignServiceNull: shell.serviceFor("foreign.plugin") === null,
+          emptyText: cataloguePanel.appEmptyText
+        })
       })
     } else if (scenario === "excluded-groups") {
       var excludedPanel = widget._probePanelItem

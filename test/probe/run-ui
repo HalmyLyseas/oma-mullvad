@@ -70,4 +70,9 @@ check "[[ \"$(field "$json" processCount)\" == 14 && \"$(field "$json" groupCoun
 check "[[ \"$(field "$json" firstLabel)\" == chromium && \"$(field "$json" firstCount)\" == 14 ]]" "group exposes the root process label and member count"
 check "[[ \"$(field "$json" pageLoaded)\" == true && \"$(field "$json" pageGroupCount)\" == 1 ]]" "Excluded page receives the grouped model"
 
+json="$(run_case local-app-catalogue)"
+check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" selectedPage)\" == 3 ]]" "local application catalogue scenario loads the Excluded page"
+check "[[ \"$(field "$json" appLibraryNull)\" == true && \"$(field "$json" ownService)\" == true && \"$(field "$json" foreignServiceNull)\" == true ]]" "probe matches the scoped Omarchy 4.0.3 facade"
+check "[[ \"$(field "$json" emptyText)\" == 'No installed applications match your search.' ]]" "local catalogue does not require the host app library"
+
 exit "$((failures > 0))"
