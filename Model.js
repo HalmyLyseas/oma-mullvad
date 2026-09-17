@@ -856,6 +856,77 @@ function argv(action, params) {
     }
 }
 
+function desktopEntryName(entry) {
+    return plainText(entry && (entry.name || entry.id), 128);
+}
+
+function desktopEntrySubtext(entry) {
+    return plainText(entry && entry.genericName, 256);
+}
+
+function desktopEntryKeywords(entry) {
+    try {
+        if (entry && entry.keywords && typeof entry.keywords.join === "function")
+            return entry.keywords.join(" ");
+    } catch (_) {}
+    return "";
+}
+
+function desktopEntryWords(value) {
+    return text(value)
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replace(/[._:\/\\-]+/g, " ")
+        .toLowerCase()
+        .split(/[^a-z0-9]+/)
+        .filter(Boolean);
+}
+
+function desktopEntryScore(entry, query) {
+    var needle = plainText(query, 128).toLowerCase();
+    if (!needle) return 0;
+    var name = desktopEntryName(entry).toLowerCase();
+    var id = plainText(entry && entry.id, 256).toLowerCase();
+    var haystack = [name, desktopEntrySubtext(entry), entry && entry.comment,
+        desktopEntryKeywords(entry), id].join(" ").toLowerCase();
+    var acronym = desktopEntryWords([name, desktopEntrySubtext(entry),
+        desktopEntryKeywords(entry), id].join(" ")).map(function(word) {
+            return word.charAt(0);
+        }).join("");
+    var acronymIndex = needle.length <= 5 ? acronym.indexOf(needle) : -1;
+    var terms = needle.split(/\s+/).filter(Boolean);
+    for (var i = 0; i < terms.length; ++i)
+        if (haystack.indexOf(terms[i]) < 0)
+            return acronymIndex === 0 ? 5000 - acronym.length
+                : acronymIndex > 0 ? 4600 - acronymIndex * 10 - acronym.length : -1;
+    var directName = name.indexOf(needle);
+    var directId = id.indexOf(needle);
+    if (directName === 0) return 10000 - name.length;
+    if (directId === 0) return 9500 - id.length;
+    if (directName > 0) return 8000 - directName * 10 - name.length;
+    if (directId > 0) return 7600 - directId * 10 - id.length;
+    if (acronymIndex === 0) return 5000 - acronym.length;
+    if (acronymIndex > 0) return 4600 - acronymIndex * 10 - acronym.length;
+    return haystack.indexOf(needle) >= 0 ? 6000 - haystack.indexOf(needle) : 4000 - name.length;
+}
+
+function searchDesktopEntries(values, query, maxRows) {
+    values = values && typeof values.length === "number" ? values : [];
+    var limit = Math.max(1, Math.min(Number(maxRows) || 30, 100));
+    var rows = [];
+    for (var i = 0; i < values.length; ++i) {
+        var entry = values[i];
+        if (!entry || entry.noDisplay || !desktopEntryName(entry) || !plainText(entry.id, 256)) continue;
+        var score = desktopEntryScore(entry, query);
+        if (score >= 0) rows.push({ entry: entry, score: score,
+            name: desktopEntryName(entry).toLowerCase() });
+    }
+    rows.sort(function(left, right) {
+        if (left.score !== right.score) return right.score - left.score;
+        return left.name < right.name ? -1 : left.name > right.name ? 1 : 0;
+    });
+    return rows.slice(0, limit).map(function(row) { return row.entry; });
+}
+
 var api = {
     redact: redact,
     plainText: plainText,
@@ -881,6 +952,9 @@ var api = {
     parseExcludedPids: parseExcludedPids,
     parseProcessTable: parseProcessTable,
     groupExcludedProcesses: groupExcludedProcesses,
+    desktopEntryName: desktopEntryName,
+    desktopEntrySubtext: desktopEntrySubtext,
+    searchDesktopEntries: searchDesktopEntries,
     validatePort: validatePort,
     validateFavoriteIndex: validateFavoriteIndex,
     validateDnsAddress: validateDnsAddress,

@@ -243,6 +243,29 @@ test("excluded-process grouping follows parent links without a user unit", () =>
     assert.deepEqual(groups[0].pids, [5000, 5001]);
 });
 
+test("desktop entries search locally with bounds and no-display filtering", () => {
+    const values = [
+        { id: "org.mozilla.firefox", name: "Firefox", genericName: "Web Browser",
+          comment: "Browse the web", keywords: ["internet", "browser"] },
+        { id: "org.keepassxc.KeePassXC", name: "KeePassXC", genericName: "Password Manager",
+          comment: "", keywords: ["vault"] },
+        { id: "hidden.desktop", name: "Hidden Tool", noDisplay: true },
+        { id: "markup.desktop", name: "<b>Unsafe</b>", genericName: "<i>Utility</i>" }
+    ];
+
+    assert.deepEqual(Model.searchDesktopEntries(values, "fire", 30).map(row => row.id),
+        ["org.mozilla.firefox"]);
+    assert.deepEqual(Model.searchDesktopEntries(values, "pm", 30).map(row => row.id),
+        ["org.keepassxc.KeePassXC"]);
+    assert.equal(Model.searchDesktopEntries(values, "hidden", 30).length, 0);
+    assert.equal(Model.searchDesktopEntries(values, "", 30).length, 3);
+    assert.equal(Model.desktopEntryName(values[3]), "Unsafe");
+    assert.equal(Model.desktopEntrySubtext(values[3]), "Utility");
+    assert.equal(Model.searchDesktopEntries(Array.from({ length: 100 }, (_, i) => ({
+        id: `app-${i}.desktop`, name: `App ${i}`
+    })), "app", 30).length, 30);
+});
+
 test("trust-boundary validation accepts useful values and rejects malformed input", () => {
     assert.equal(Model.validatePort(53), true);
     assert.equal(Model.validatePort(0), false);
