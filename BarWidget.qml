@@ -11,7 +11,7 @@ BarWidget {
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property color barForeground: bar ? bar.barForeground : Color.foreground
-  readonly property string stateIcon: !svc ? "connecting"
+  readonly property string stateIcon: !svc ? "error"
     : svc.state === "checking" ? "connecting"
     : !svc.installed || !svc.daemonRunning || svc.state === "error" ? "error"
     : svc.state === "blocked" ? "warning"
@@ -21,7 +21,7 @@ BarWidget {
   readonly property color stateColor: stateIcon === "error" || stateIcon === "warning" ? urgent
     : svc && svc.connected ? foreground : Qt.darker(foreground, 1.55)
   readonly property string tunnelHint: svc && svc.active ? "Disconnect Mullvad VPN" : "Connect Mullvad VPN"
-  readonly property string barTooltip: !svc ? "Checking Mullvad…"
+  readonly property string barTooltip: !svc ? "Mullvad controls unavailable in this bar"
     : !svc.installed ? "Mullvad CLI is not installed"
     : !svc.daemonRunning ? "Mullvad daemon is unavailable"
     : stateIcon === "error" ? "Mullvad tunnel error"

@@ -8,6 +8,8 @@ ShellRoot {
   property var service: null
   property var widget: null
   property bool finished: false
+  property int reloadPhase: 0
+  property var originalService: null
 
   QtObject {
     id: shell
@@ -23,6 +25,13 @@ ShellRoot {
       lastUpdateId = id
       lastUpdatePayload = entry
     }
+  }
+
+  QtObject {
+    id: replacementShell
+    readonly property var appLibrary: null
+    function serviceFor(id) { return null }
+    function updateEntryInline(id, entry) {}
   }
 
   QtObject {
@@ -111,6 +120,36 @@ ShellRoot {
         errorIcon: widget.stateIcon,
         errorTooltip: widget.barTooltip
       })
+    } else if (scenario === "widget-reload") {
+      if (reloadPhase === 0) {
+        reloadPhase = 1
+        originalService = service
+        widgetLoader.active = false
+        reloadWait.start()
+      } else finish("", {
+        sameService: shell.serviceFor("io.github.kallupx.oma-mullvad") === originalService,
+        panelServiceMatches: widget._probePanelItem && widget._probePanelItem.service === originalService
+      })
+    } else if (scenario === "replacement-bar") {
+      bar.shell = replacementShell
+      replacementWait.start()
+    } else if (scenario === "facade-contract") {
+      shell.updateEntryInline("foreign.plugin", { value: 1 })
+      var foreignIgnored = shell.lastUpdateId === ""
+      shell.updateEntryInline("io.github.kallupx.oma-mullvad", { refreshIntervalSec: 45 })
+      bar.requestPopout(widget)
+      var popupOwned = bar.activePopout === widget
+      bar.releasePopout(widget)
+      finish("", {
+        ownService: shell.serviceFor("io.github.kallupx.oma-mullvad") === service,
+        foreignServiceNull: shell.serviceFor("foreign.plugin") === null,
+        appLibraryNull: shell.appLibrary === null,
+        foreignUpdateIgnored: foreignIgnored,
+        ownUpdateRecorded: shell.lastUpdateId === "io.github.kallupx.oma-mullvad",
+        scalarPropertiesUsable: widget.foreground === bar.foreground && widget.barForeground === bar.barForeground,
+        popupOwned: popupOwned,
+        popupReleased: bar.activePopout === null
+      })
     } else if (scenario === "lifecycle") {
       var firstLoaded = widget._probePanelItem !== null
       shell.serviceInstance = null
@@ -196,6 +235,29 @@ ShellRoot {
         })
       })
     } else finish("unknown scenario")
+  }
+
+  Timer {
+    id: reloadWait
+    interval: 50
+    onTriggered: widgetLoader.active = true
+  }
+
+  Timer {
+    id: replacementWait
+    property int elapsed: 0
+    interval: 50
+    repeat: true
+    onTriggered: {
+      elapsed += interval
+      if (root.widget.svc === null && root.widget._probePanelItem === null) {
+        stop()
+        root.finish("", {
+          unavailableTooltip: root.widget.barTooltip,
+          panelDestroyed: root.widget._probePanelItem === null
+        })
+      } else if (elapsed > 5000) root.finish("replacement bar did not settle")
+    }
   }
 
   Timer {

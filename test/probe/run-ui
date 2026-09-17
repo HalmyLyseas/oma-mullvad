@@ -51,6 +51,19 @@ check "[[ \"$(field "$json" firstPanelLoaded)\" == true ]]" "Panel exists while 
 check "[[ \"$(field "$json" loaderInactive)\" == true && \"$(field "$json" loaderStatusNull)\" == true ]]" "Panel Loader deactivates when the service disappears"
 check "[[ \"$(field "$json" panelDestroyed)\" == true ]]" "stale Panel is destroyed"
 
+json="$(run_case widget-reload)"
+check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" sameService)\" == true ]]" "widget reload preserves the keepLoaded service instance"
+check "[[ \"$(field "$json" panelServiceMatches)\" == true ]]" "reloaded widget injects the retained service into its panel"
+
+json="$(run_case replacement-bar)"
+check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" panelDestroyed)\" == true ]]" "replacement bar without service access destroys the panel"
+check "[[ \"$(field "$json" unavailableTooltip)\" == 'Mullvad controls unavailable in this bar' ]]" "replacement bar renders an explicit unavailable state"
+
+json="$(run_case facade-contract)"
+check "[[ \"$(field "$json" ownService)\" == true && \"$(field "$json" foreignServiceNull)\" == true && \"$(field "$json" appLibraryNull)\" == true ]]" "scoped facade exposes only the plugin service"
+check "[[ \"$(field "$json" foreignUpdateIgnored)\" == true && \"$(field "$json" ownUpdateRecorded)\" == true ]]" "scoped facade accepts only own-ID settings updates"
+check "[[ \"$(field "$json" scalarPropertiesUsable)\" == true && \"$(field "$json" popupOwned)\" == true && \"$(field "$json" popupReleased)\" == true ]]" "scalar bar and popup ownership APIs remain usable"
+
 json="$(run_case availability-cli)"
 check "[[ \"$(field "$json" cliReady)\" == false && \"$(field "$json" overviewAvailable)\" == true ]]" "Overview remains available without the CLI"
 check "[[ \"$(field "$json" locationsAvailable)\" == false && \"$(field "$json" advancedAvailable)\" == false && \"$(field "$json" excludedAvailable)\" == false ]]" "CLI-dependent pages lock without the CLI"
