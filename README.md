@@ -9,10 +9,11 @@ Mullvad VPN controls for the Omarchy Quattro bar.
 - Save up to nine favourite locations
 - Filter by provider, ownership, and IP version
 - Configure DNS, anti-censorship, LAN sharing, and lockdown mode
-- Launch apps outside the VPN
+- Discover installed applications and launch them outside the VPN
+- Group related excluded processes by launched application
 - View Mullvad relay cities on a world map
 
-OmaMullvad follows the active Omarchy theme and works with the stock bar and Shibumi.
+OmaMullvad supports the Omarchy 4.0.3+ stock bar. Replacement bars that do not expose the plugin's scoped service show unavailable controls rather than attempting access to host internals.
 
 ## Install
 
@@ -20,7 +21,7 @@ OmaMullvad follows the active Omarchy theme and works with the stock bar and Shi
 omarchy plugin add https://github.com/kallupx/oma-mullvad.git --enable
 ```
 
-OmaMullvad targets Mullvad VPN 2026.4. If Mullvad is missing, the panel can install the AUR package `mullvad-vpn-bin` after confirmation.
+OmaMullvad targets Mullvad VPN 2026.4. Install and enable Mullvad VPN separately before using the controls.
 
 ## Controls
 
@@ -28,7 +29,7 @@ OmaMullvad targets Mullvad VPN 2026.4. If Mullvad is missing, the panel can inst
 - Right-click: connect or disconnect
 - Middle-click: refresh
 
-The panel has Overview, Locations, Advanced, and Excluded Apps pages. It is fully keyboard-accessible.
+The panel has Overview, Locations, Advanced, and Excluded Apps pages. It is keyboard-accessible.
 
 ## Hotkeys
 
@@ -48,17 +49,17 @@ omarchy plugin remove io.github.kallupx.oma-mullvad
 
 ## Privacy
 
-Account numbers are sent to `mullvad account login` over standard input and are never stored. OmaMullvad stores only favourites and recent locations; Mullvad remains responsible for VPN settings.
+Account numbers are sent to `mullvad account login` over standard input and are never stored. OmaMullvad stores only favourite locations, recent locations, and recent excluded desktop IDs. Mullvad remains responsible for VPN settings.
 
 ## Verify
 
+Run the complete non-disruptive local gate:
+
 ```bash
-node --test
-node tests/cli-contract.mjs
-omarchy plugin validate .
+bash test/ci-local --no-cage
 ```
 
-The CLI contract check is read-only.
+The live CLI contract is read-only. VPN-changing operations are mocked by the automated suites.
 
 ## License
 
