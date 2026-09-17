@@ -856,6 +856,35 @@ function argv(action, params) {
     }
 }
 
+function validRecentDesktopId(value) {
+    var id = text(value).trim();
+    try {
+        argv("launchExcluded", { desktopId: id });
+        return id;
+    } catch (_) {
+        return "";
+    }
+}
+
+function normalizeRecentApps(values) {
+    var result = [];
+    var seen = {};
+    values = Array.isArray(values) ? values.slice(0, 256) : [];
+    for (var i = 0; i < values.length && result.length < 10; ++i) {
+        var id = validRecentDesktopId(values[i]);
+        if (!id || seen[id]) continue;
+        seen[id] = true;
+        result.push(id);
+    }
+    return result;
+}
+
+function addRecentApp(values, desktopId) {
+    var id = validRecentDesktopId(desktopId);
+    if (!id) return normalizeRecentApps(values);
+    return normalizeRecentApps([id].concat(normalizeRecentApps(values)));
+}
+
 function desktopEntryName(entry) {
     return plainText(entry && (entry.name || entry.id), 128);
 }
@@ -952,6 +981,8 @@ var api = {
     parseExcludedPids: parseExcludedPids,
     parseProcessTable: parseProcessTable,
     groupExcludedProcesses: groupExcludedProcesses,
+    normalizeRecentApps: normalizeRecentApps,
+    addRecentApp: addRecentApp,
     desktopEntryName: desktopEntryName,
     desktopEntrySubtext: desktopEntrySubtext,
     searchDesktopEntries: searchDesktopEntries,

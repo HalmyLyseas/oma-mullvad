@@ -266,6 +266,19 @@ test("desktop entries search locally with bounds and no-display filtering", () =
     })), "app", 30).length, 30);
 });
 
+test("recent excluded apps normalize, deduplicate, and cap at ten", () => {
+    assert.deepEqual(Model.normalizeRecentApps([
+        "org.mozilla.firefox.desktop", "bad id;rm", "org.mozilla.firefox.desktop",
+        ...Array.from({ length: 20 }, (_, i) => `app-${i}.desktop`)
+    ]), [
+        "org.mozilla.firefox.desktop", "app-0.desktop", "app-1.desktop", "app-2.desktop",
+        "app-3.desktop", "app-4.desktop", "app-5.desktop", "app-6.desktop",
+        "app-7.desktop", "app-8.desktop"
+    ]);
+    assert.deepEqual(Model.addRecentApp(["one.desktop", "two.desktop"], "two.desktop"),
+        ["two.desktop", "one.desktop"]);
+});
+
 test("trust-boundary validation accepts useful values and rejects malformed input", () => {
     assert.equal(Model.validatePort(53), true);
     assert.equal(Model.validatePort(0), false);

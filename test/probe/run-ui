@@ -75,4 +75,11 @@ check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" select
 check "[[ \"$(field "$json" appLibraryNull)\" == true && \"$(field "$json" ownService)\" == true && \"$(field "$json" foreignServiceNull)\" == true ]]" "probe matches the scoped Omarchy 4.0.3 facade"
 check "[[ \"$(field "$json" emptyText)\" == 'No installed applications match your search.' ]]" "local catalogue does not require the host app library"
 
+json="$(run_case recent-apps)"
+check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" recentCount)\" -ge 1 ]]" "empty query resolves recent desktop IDs"
+check "[[ \"$(field "$json" searchCount)\" -ge 1 ]]" "non-empty query searches the complete local catalogue"
+check "[[ -z \"$(field "$json" queryAfterLaunch)\" && \"$(field "$json" updateId)\" == io.github.kallupx.oma-mullvad ]]" "launch recording clears search and updates only the plugin settings"
+check "[[ \"$(field "$json" savedRecentFirst)\" == \"$(field "$json" recentFirst)\" && \"$(field "$json" refreshIntervalSec)\" == 30 ]]" "recent launch persistence preserves unrelated settings"
+check "[[ -z \"$(field "$json" queryAfterLeave)\" ]]" "leaving the Excluded tab clears stale search"
+
 exit "$((failures > 0))"

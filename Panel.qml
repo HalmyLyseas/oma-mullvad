@@ -25,6 +25,7 @@ Panel {
   property var selectedLocation: null
   property var favoriteLocations: []
   property var recentLocations: []
+  property var recentExcludedApps: []
   property int appCatalogueRevision: 0
   property var pendingConfirmation: null
   property bool syncingSettings: false
@@ -85,15 +86,24 @@ Panel {
     return false
   }
 
-  function persistCollections(favorites, recents) {
+  function persistCollections(favorites, recents, recentApps) {
     favoriteLocations = Model.normalizeFavorites(arrayFrom(favorites))
     recentLocations = Model.normalizeFavorites(arrayFrom(recents)).slice(0, 5)
+    recentExcludedApps = Model.normalizeRecentApps(arrayFrom(
+      recentApps === undefined ? recentExcludedApps : recentApps))
     if (!bar || !bar.shell || typeof bar.shell.updateEntryInline !== "function") return
     var entry = { id: moduleName }
     for (var key in settings) if (key !== "id") entry[key] = settings[key]
     entry.favoriteLocations = favoriteLocations
     entry.recentLocations = recentLocations
+    entry.recentExcludedApps = recentExcludedApps
     bar.shell.updateEntryInline(moduleName, entry)
+  }
+
+  function recordLaunchedApp(desktopId) {
+    persistCollections(favoriteLocations, recentLocations,
+      Model.addRecentApp(arrayFrom(recentExcludedApps), desktopId))
+    appQuery = ""
   }
 
   function toggleFavorite(location) {
@@ -276,10 +286,18 @@ Panel {
 
   function appRows() {
     var revision = appCatalogueRevision
-    var source = Model.searchDesktopEntries(DesktopEntries.applications.values || [], appQuery, 30)
     var result = []
-    for (var i = 0; i < source.length; i++)
-      if (source[i] && source[i].id) result.push(source[i])
+    if (String(appQuery || "").trim() === "") {
+      var ids = arrayFrom(recentExcludedApps)
+      for (var r = 0; r < ids.length && result.length < 10; r++) {
+        var found = DesktopEntries.byId(String(ids[r]))
+        if (found && found.id) result.push(found)
+      }
+    } else {
+      var source = Model.searchDesktopEntries(DesktopEntries.applications.values || [], appQuery, 30)
+      for (var i = 0; i < source.length; i++)
+        if (source[i] && source[i].id) result.push(source[i])
+    }
     return result
   }
 
@@ -305,6 +323,7 @@ Panel {
   function showPage(index) {
     var target = Math.max(0, Math.min(3, index))
     if (!pageAvailable(target)) return
+    if (target !== 3 || pageIndex !== 3) appQuery = ""
     pageIndex = target
     if (target === 3) service.refreshExcluded()
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
@@ -363,11 +382,13 @@ Panel {
     syncingSettings = true
     favoriteLocations = Model.normalizeFavorites(arrayFrom(setting("favoriteLocations", [])))
     recentLocations = Model.normalizeFavorites(arrayFrom(setting("recentLocations", []))).slice(0, 5)
+    recentExcludedApps = Model.normalizeRecentApps(arrayFrom(setting("recentExcludedApps", [])))
     syncingSettings = false
   }
 
   onSettingsChanged: syncInlineSettings()
   onOpenedChanged: if (opened) {
+    appQuery = ""
     pageFlick.contentY = 0
     service.refreshAll()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -1594,6 +1615,7 @@ Panel {
     function launchExcluded() {
       if (service.busy || !app || !app.id) return
       service.launchExcludedApp(String(app.id))
+      root.recordLaunchedApp(String(app.id))
       root.close()
     }
 

@@ -145,6 +145,39 @@ ShellRoot {
           emptyText: cataloguePanel.appEmptyText
         })
       })
+    } else if (scenario === "recent-apps") {
+      var recentPanel = widget._probePanelItem
+      service.installed = true
+      service.daemonRunning = true
+      recentPanel.showPage(3)
+      var values = DesktopEntries.applications.values || []
+      var usable = []
+      for (var i = 0; i < values.length && usable.length < 2; i++)
+        if (values[i] && values[i].id && !values[i].noDisplay) usable.push(values[i])
+      if (!usable.length) {
+        finish("desktop entry catalogue is empty")
+        return
+      }
+      recentPanel.recentExcludedApps = usable.map(function(entry) { return String(entry.id) })
+      recentPanel.appQuery = ""
+      var recentRows = recentPanel.appRows()
+      recentPanel.appQuery = String(usable[0].name || usable[0].id).slice(0, 3)
+      var searchRows = recentPanel.appRows()
+      recentPanel.recordLaunchedApp(String(usable[0].id))
+      var queryAfterLaunch = recentPanel.appQuery
+      recentPanel.appQuery = "stale"
+      recentPanel.showPage(2)
+      finish("", {
+        recentCount: recentRows.length,
+        recentFirst: recentRows.length ? String(recentRows[0].id) : "",
+        searchCount: searchRows.length,
+        queryAfterLaunch: queryAfterLaunch,
+        queryAfterLeave: recentPanel.appQuery,
+        updateId: shell.lastUpdateId,
+        savedRecentFirst: shell.lastUpdatePayload && shell.lastUpdatePayload.recentExcludedApps
+          ? String(shell.lastUpdatePayload.recentExcludedApps[0]) : "",
+        refreshIntervalSec: shell.lastUpdatePayload ? shell.lastUpdatePayload.refreshIntervalSec : 0
+      })
     } else if (scenario === "excluded-groups") {
       var excludedPanel = widget._probePanelItem
       service.installed = true
