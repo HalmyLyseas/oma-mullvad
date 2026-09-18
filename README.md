@@ -12,6 +12,7 @@ Mullvad VPN controls for the Omarchy Quattro bar.
 - Discover installed applications and launch them outside the VPN
 - Group related excluded processes by launched application
 - View Mullvad relay cities on a world map
+- Inspect bounded, read-only CLI, daemon, package, and update-check diagnostics
 
 OmaMullvad supports the Omarchy 4.0.3+ stock bar. Replacement bars that do not expose the plugin's scoped service show unavailable controls rather than attempting access to host internals.
 
@@ -29,7 +30,7 @@ OmaMullvad targets Mullvad VPN 2026.4. Install and enable Mullvad VPN separately
 - Right-click: connect or disconnect
 - Middle-click: refresh
 
-The panel has Overview, Locations, Advanced, and Excluded Apps pages. It is keyboard-accessible.
+The panel has Overview, Locations, Advanced, Excluded Apps, and System pages. It is keyboard-accessible. System remains available when the Mullvad CLI or daemon is unavailable and offers only a read-only update check; installation and package or service changes remain separate administrator actions.
 
 ## Known limitations
 

@@ -9,6 +9,7 @@
 - Disable CLI- and daemon-dependent controls when Mullvad is unavailable, with separate-install guidance and no package-manager action.
 - Restore correctness, process, UI, lifecycle, facade, read-only CLI, lint, manifest, and clean-archive validation without shell `eval` in probes.
 - Validate against exact Omarchy `v4.0.3` and `v4.0.4` shell and plugin-validator sources in CI.
-- Keep the privileged System/package installation and update tab deferred; it is not included in this release.
+- Restore the fifth System tab with bounded, plain-text CLI, daemon, PID, package metadata, suggested-upgrade, and timestamped read-only update-check diagnostics.
+- Keep diagnostics available without the CLI or daemon, run `checkupdates` outside the service busy queue with debounce and TERM/KILL deadlines, and provide no package installation, update, service mutation, privilege, or terminal-launch action.
 
 Version 1.4.6 continues the maintained fork's public 1.4.5 sequence while retaining the upstream plugin identity and attribution.
