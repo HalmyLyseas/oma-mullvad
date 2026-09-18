@@ -5,6 +5,12 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 use_cage=1
 [[ "${1:-}" == --no-cage ]] && use_cage=0
 [[ $# -le 1 ]] || { echo "usage: test/ci-local [--no-cage]" >&2; exit 2; }
+omarchy_shell_dir="${OMARCHY_SHELL_DIR:-/usr/share/omarchy/shell}"
+omarchy_plugin_validator="${OMARCHY_PLUGIN_VALIDATOR:-$(command -v omarchy-plugin-validate || true)}"
+[[ -d "$omarchy_shell_dir" ]] || { echo "Omarchy shell not found: $omarchy_shell_dir" >&2; exit 1; }
+[[ -x "$omarchy_plugin_validator" ]] || { echo "Omarchy plugin validator not found: $omarchy_plugin_validator" >&2; exit 1; }
+export OMARCHY_SHELL_DIR="$omarchy_shell_dir"
+export OMARCHY_PLUGIN_VALIDATOR="$omarchy_plugin_validator"
 
 status=0
 run_step() {
@@ -16,14 +22,14 @@ run_step() {
 qmlroot="$(mktemp -d)"
 archive_dir="$(mktemp -d)"
 trap 'rm -rf "$qmlroot" "$archive_dir"' EXIT
-ln -s /usr/share/omarchy/shell "$qmlroot/qs"
+ln -s "$omarchy_shell_dir" "$qmlroot/qs"
 qmllint_bin="$(command -v qmllint || command -v /usr/lib/qt6/bin/qmllint || true)"
 
 lint_tree() {
   local tree="$1" file rc=0
   [[ -n "$qmllint_bin" ]] || { echo "qmllint is unavailable" >&2; return 1; }
   while IFS= read -r -d '' file; do
-    "$qmllint_bin" -I "$qmlroot" -I /usr/share/omarchy/shell "$tree/$file" >/dev/null || rc=1
+    "$qmllint_bin" -I "$qmlroot" -I "$omarchy_shell_dir" "$tree/$file" >/dev/null || rc=1
   done < <(git -C "$root" ls-files -z '*.qml')
   return "$rc"
 }
@@ -34,11 +40,11 @@ clean_archive() {
   git -C "$root" archive "$tree" | tar -x -C "$archive_dir" || return 1
   node --test "$archive_dir/tests"/*.test.js || return 1
   lint_tree "$archive_dir" || return 1
-  omarchy plugin validate "$archive_dir" || return 1
+  "$omarchy_plugin_validator" "$archive_dir" || return 1
 }
 
 run_step lint_tree "$root"
-run_step omarchy plugin validate "$root"
+run_step "$omarchy_plugin_validator" "$root"
 
 if [[ "$use_cage" -eq 0 ]]; then
   run_step bash "$root/test/all"

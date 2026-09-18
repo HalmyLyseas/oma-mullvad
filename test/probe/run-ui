@@ -3,6 +3,7 @@ set -uo pipefail
 
 probe_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin_dir="$(cd "$probe_dir/../.." && pwd)"
+omarchy_shell_dir="${OMARCHY_SHELL_DIR:-/usr/share/omarchy/shell}"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 failures=0
@@ -13,7 +14,7 @@ if ! command -v qs >/dev/null 2>&1; then
 fi
 
 mkdir -p "$scratch/qmlroot" "$scratch/bin"
-ln -s /usr/share/omarchy/shell "$scratch/qmlroot/qs"
+ln -s "$omarchy_shell_dir" "$scratch/qmlroot/qs"
 ln -s "$plugin_dir/test/mocks/mullvad" "$scratch/bin/mullvad"
 ln -s "$plugin_dir/test/mocks/ps" "$scratch/bin/ps"
 

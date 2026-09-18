@@ -11,41 +11,32 @@ jobs:
   test:
     runs-on: ubuntu-latest
     container: archlinux:latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        omarchy: [v4.0.3, v4.0.4]
+    env:
+      OMARCHY_SHELL_DIR: /tmp/omarchy/shell
+      OMARCHY_PLUGIN_VALIDATOR: /tmp/omarchy/bin/omarchy-plugin-validate
     steps:
-      - name: Install Git
-        run: pacman -Syu --noconfirm git
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm git quickshell cage nodejs jq
 
       - uses: actions/checkout@v7
 
       - name: Trust the checkout
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Install probe dependencies
+      - name: Clone exact Omarchy source
         run: |
-          printf '[omarchy]\nSigLevel = Optional TrustAll\nServer = https://pkgs.omarchy.org/stable/$arch\n' >> /etc/pacman.conf
-          pacman -Syu --noconfirm quickshell cage nodejs jq
+          git clone --depth 1 --branch "${{ matrix.omarchy }}" https://github.com/basecamp/omarchy.git /tmp/omarchy
+          test "$(git -C /tmp/omarchy describe --tags --exact-match)" = "${{ matrix.omarchy }}"
+          test -d "$OMARCHY_SHELL_DIR"
+          test -x "$OMARCHY_PLUGIN_VALIDATOR"
 
-      - name: Extract Omarchy shell and validator
-        run: |
-          pacman -Swdd --noconfirm omarchy
-          package="$(find /var/cache/pacman/pkg -maxdepth 1 -type f -name 'omarchy-[0-9]*-any.pkg.tar.zst' -print -quit)"
-          test -n "$package"
-          bsdtar -x -C / -f "$package" usr/share/omarchy/shell usr/share/omarchy/bin usr/bin/omarchy-plugin-validate
-
-      - name: Validate and lint QML
-        run: |
-          omarchy-plugin-validate .
-          mkdir -p /tmp/qmlroot
-          ln -s /usr/share/omarchy/shell /tmp/qmlroot/qs
-          count=0
-          while IFS= read -r file; do
-            /usr/lib/qt6/bin/qmllint -I /tmp/qmlroot -I /usr/share/omarchy/shell "$file"
-            count=$((count + 1))
-          done < <(find . -type f -name '*.qml' -print)
-          test "$count" -ge 8
-
-      - name: Unit and headless QML probes
+      - name: Validate against Omarchy ${{ matrix.omarchy }}
         env:
           WLR_BACKENDS: headless
           WLR_RENDERER: pixman
@@ -55,4 +46,4 @@ jobs:
         run: |
           mkdir -p "$XDG_RUNTIME_DIR"
           chmod 700 "$XDG_RUNTIME_DIR"
-          cage -- bash test/all
+          bash test/ci-local
