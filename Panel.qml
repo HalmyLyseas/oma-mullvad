@@ -645,30 +645,13 @@ Panel {
           text: service.state === "checking"
             ? "Checking for Mullvad VPN…"
             : !service.installed
-            ? "Mullvad CLI was not found. Use the install button below or install Mullvad with your preferred method."
+            ? "Mullvad CLI was not found. Install Mullvad separately with your preferred method, then press refresh."
             : "The Mullvad daemon is unavailable. Start mullvad-daemon, then press refresh."
           color: root.urgent
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
           wrapMode: Text.WordWrap
         }
-      }
-
-      Button {
-        visible: !service.installed && service.state === "unavailable"
-        width: parent.width
-        text: "Install Mullvad VPN (AUR)"
-        bordered: true
-        focusable: true
-        foreground: root.foreground
-        onClicked: root.confirmAction(
-          "Install the mullvad-vpn-bin package from the AUR? A terminal will open and ask for your sudo password.",
-          function() {
-            Quickshell.execDetached([
-              "omarchy-launch-floating-terminal-with-presentation",
-              "omarchy pkg aur add mullvad-vpn-bin"
-            ])
-          })
       }
 
       BorderSurface {

@@ -13,3 +13,9 @@ test("every local QML Text sink is explicitly plain text", () => {
         }
     }
 });
+
+test("missing CLI UI only gives separate-install guidance", () => {
+    const panel = readFileSync(join(__dirname, "..", "Panel.qml"), "utf8");
+    assert.match(panel, /Mullvad CLI was not found\.[^"\n]*install Mullvad separately/i);
+    assert.doesNotMatch(panel, /Install Mullvad VPN \(AUR\)|mullvad-vpn-bin|omarchy pkg|package manager/i);
+});
