@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.kallupx.oma-mullvad",
+  "id": "halmylyseas.oma-mullvad",
   "name": "OmaMullvad",
-  "version": "1.4.6",
-  "author": "kallupx",
+  "version": "1.5-rc",
+  "author": "HalmyLyseas",
   "license": "MIT",
   "description": "A theme-aware Mullvad VPN control and status widget for the Omarchy bar.",
   "kinds": [

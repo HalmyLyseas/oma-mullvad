@@ -16,7 +16,7 @@ The System page is diagnostic only. It has no installer, package-update action, 
 
 ## Omarchy 4.0.3 facade
 
-A third-party `bar-widget` receives a scoped facade. `serviceFor("io.github.kallupx.oma-mullvad")` may resolve the plugin service; foreign service IDs must return `null`. The facade's `appLibrary` is `null` because the manifest does not declare `kind: "menu"`. The plugin does not traverse parent objects, private service registries, or replacement-bar internals to escape this boundary.
+A third-party `bar-widget` receives a scoped facade. `serviceFor("halmylyseas.oma-mullvad")` may resolve the plugin service; foreign service IDs must return `null`. The facade's `appLibrary` is `null` because the manifest does not declare `kind: "menu"`. The plugin does not traverse parent objects, private service registries, or replacement-bar internals to escape this boundary.
 
 Excluded-app discovery uses the public Quickshell `DesktopEntries` catalogue. Search scans at most 4,096 entries, caps keyword count at 64, and bounds every searchable field before concatenation. Standard `noDisplay` entries are filtered. Omarchy's private launcher-hide configuration is not available through the scoped facade. Empty search shows resolved recent desktop IDs, while a non-empty query searches the bounded local catalogue. Launch execution remains the fixed argv returned by `Model.argv("launchExcluded", ...)`; safe desktop IDs may contain spaces and parentheses, while path syntax and shell metacharacters remain rejected. The panel persists the recent ID and closes only when the service reports that dispatch succeeded.
 

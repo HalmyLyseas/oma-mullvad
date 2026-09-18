@@ -126,7 +126,7 @@ check_json "$json" "local catalogue does not require the host app library" empty
 json="$(run_case recent-apps)"
 check_json "$json" "empty query resolves recent desktop IDs" note empty ignored recentCount ge 1
 check_json "$json" "non-empty query searches the complete local catalogue" searchCount ge 1
-check_json "$json" "launch recording clears search and updates only the plugin settings" queryAfterLaunch empty ignored updateId eq io.github.kallupx.oma-mullvad
+check_json "$json" "launch recording clears search and updates only the plugin settings" queryAfterLaunch empty ignored updateId eq halmylyseas.oma-mullvad
 recent_first="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).recentFirst || ""))' "$json")"
 check_json "$json" "recent launch persistence preserves unrelated settings" savedRecentFirst eq "$recent_first" refreshIntervalSec eq 30
 check_json "$json" "leaving the Excluded tab clears stale search" queryAfterLeave empty ignored

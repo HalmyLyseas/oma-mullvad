@@ -4,7 +4,7 @@ import Quickshell.Io
 
 ShellRoot {
   id: root
-  readonly property string pluginId: "io.github.kallupx.oma-mullvad"
+  readonly property string pluginId: "halmylyseas.oma-mullvad"
   readonly property string shellPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
   property var host: null
   property var facade: null

@@ -19,10 +19,14 @@ OmaMullvad supports the Omarchy 4.0.3+ stock bar. Replacement bars that do not e
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/kallupx/oma-mullvad.git --enable
+omarchy plugin add https://github.com/HalmyLyseas/oma-mullvad.git --enable
 ```
 
 OmaMullvad targets Mullvad VPN 2026.4. Install and enable Mullvad VPN separately before using the controls.
+
+## Upgrading from the upstream identity
+
+Version `1.5-rc` uses the distinct plugin ID `halmylyseas.oma-mullvad`. It does not automatically migrate an installation of `io.github.kallupx.oma-mullvad`. Back up `~/.config/omarchy/shell.json` before switching, preserve the old widget's favourites, recent items and refresh interval, and disable the old widget before enabling this fork. Custom IPC keybindings must use the new ID.
 
 ## Controls
 
@@ -43,15 +47,15 @@ Do not disable Tailscale netfilter without providing equivalent firewall and tai
 OmaMullvad does not add keybindings automatically. Example `~/.config/hypr/bindings.lua` entries:
 
 ```lua
-o.bind("SUPER + SHIFT + V", "Toggle Mullvad", "omarchy-shell io.github.kallupx.oma-mullvad toggleTunnel")
-o.bind("SUPER + ALT + V", "Next Mullvad favourite", "omarchy-shell io.github.kallupx.oma-mullvad nextFavorite")
-o.bind("SUPER + SHIFT + ALT + V", "OmaMullvad panel", "omarchy-shell io.github.kallupx.oma-mullvad toggle")
+o.bind("SUPER + SHIFT + V", "Toggle Mullvad", "omarchy-shell halmylyseas.oma-mullvad toggleTunnel")
+o.bind("SUPER + ALT + V", "Next Mullvad favourite", "omarchy-shell halmylyseas.oma-mullvad nextFavorite")
+o.bind("SUPER + SHIFT + ALT + V", "OmaMullvad panel", "omarchy-shell halmylyseas.oma-mullvad toggle")
 ```
 
 ## Uninstall
 
 ```bash
-omarchy plugin remove io.github.kallupx.oma-mullvad
+omarchy plugin remove halmylyseas.oma-mullvad
 ```
 
 ## Privacy
@@ -72,6 +76,8 @@ The CLI contract and every VPN-changing operation run against inert test-local m
 
 ## License
 
-MIT © 2026 kallupx
+Maintained by [HalmyLyseas](https://github.com/HalmyLyseas), based on [kallupx/oma-mullvad](https://github.com/kallupx/oma-mullvad).
+
+MIT © 2026 kallupx. Original copyright and license are retained.
 
 The map uses public-domain [Natural Earth](https://www.naturalearthdata.com/) data. Relay locations come from the Mullvad CLI.
