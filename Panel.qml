@@ -38,7 +38,7 @@ Panel {
     function onValuesChanged() { root.appCatalogueRevision++ }
   }
 
-  function pageAvailable(index) { return index === 0 || cliReady }
+  function pageAvailable(index) { return index === 0 || index === 4 || cliReady }
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
@@ -325,7 +325,7 @@ Panel {
   }
 
   function showPage(index) {
-    var target = Math.max(0, Math.min(3, index))
+    var target = Math.max(0, Math.min(4, index))
     if (!pageAvailable(target)) return
     if (target !== 3 || pageIndex !== 3) appQuery = ""
     pageIndex = target
@@ -335,8 +335,8 @@ Panel {
 
   function movePage(delta) {
     var next = pageIndex
-    for (var i = 0; i < 4; i++) {
-      next = (next + delta + 4) % 4
+    for (var i = 0; i < 5; i++) {
+      next = (next + delta + 5) % 5
       if (pageAvailable(next)) { showPage(next); return }
     }
   }
@@ -463,6 +463,7 @@ Panel {
         else if (text === "2") root.showPage(1)
         else if (text === "3") root.showPage(2)
         else if (text === "4") root.showPage(3)
+        else if (text === "5") root.showPage(4)
         else if (text === "r" || text === "R") service.refreshAll()
         else if ((text === "t" || text === "T") && root.cliReady) service.toggleTunnel()
         else if ((text === "n" || text === "N") && root.cliReady) root.cycleFavorite(1)
@@ -479,7 +480,7 @@ Panel {
           spacing: Style.spacing.xs
 
           Repeater {
-            model: ["Overview", "Locations", "Advanced", "Excluded"]
+            model: ["Overview", "Locations", "Advanced", "Excluded", "System"]
             Button {
               required property string modelData
               required property int index
@@ -519,7 +520,8 @@ Panel {
             width: pageFlick.width
             sourceComponent: root.pageIndex === 0 ? overviewPage
               : root.pageIndex === 1 ? locationsPage
-              : root.pageIndex === 2 ? advancedPage : excludedPage
+              : root.pageIndex === 2 ? advancedPage
+              : root.pageIndex === 4 ? systemPage : excludedPage
           }
         }
       }
@@ -1519,6 +1521,138 @@ Panel {
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         horizontalAlignment: Text.AlignHCenter
+      }
+    }
+  }
+
+  Component {
+    id: systemPage
+
+    Column {
+      width: pageFlick.width
+      spacing: Style.space(12)
+
+      PanelHero {
+        width: parent.width
+        title: "Mullvad system"
+        meta: "Read-only local diagnostics"
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        iconComponent: Component {
+          ThemeIcon { iconSize: Style.font.display; state: "system"; color: root.foreground; urgentColor: root.urgent }
+        }
+      }
+
+      PanelSeparator { foreground: root.foreground }
+      PanelSectionHeader { text: "BINARIES"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: "CLI: " + (service.cliVersion ? Model.plainText(service.cliVersion, 64) : "unavailable")
+          + (service.cliVersion && !service.cliVersionSupported ? " (untested)" : "")
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        elide: Text.ElideRight
+      }
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: "Daemon: " + (service.daemonVersion ? Model.plainText(service.daemonVersion, 64) : "unavailable")
+          + (service.daemonSupported === false ? " (unsupported)" : "")
+        color: root.foreground
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+        elide: Text.ElideRight
+      }
+      Text {
+        textFormat: Text.PlainText
+        visible: service.suggestedUpgrade !== ""
+        width: parent.width
+        text: "Suggested upgrade: " + Model.plainText(service.suggestedUpgrade, 64)
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        elide: Text.ElideRight
+      }
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: service.daemonRunning
+          ? (service.daemonPid > 0 ? "Daemon running · PID " + service.daemonPid : "Daemon running")
+          : "Daemon not running or unavailable"
+        color: service.daemonRunning ? root.foreground : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        elide: Text.ElideRight
+      }
+
+      PanelSeparator { foreground: root.foreground }
+      PanelSectionHeader { text: "PACKAGES"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+      Text {
+        textFormat: Text.PlainText
+        visible: service.packages.length === 0
+        width: parent.width
+        text: "No Mullvad package metadata found."
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        horizontalAlignment: Text.AlignHCenter
+      }
+      Column {
+        width: parent.width
+        spacing: Style.space(4)
+        Repeater {
+          model: service.packages
+          Text {
+            required property var modelData
+            textFormat: Text.PlainText
+            width: parent.width
+            text: Model.plainText(modelData.name, 128) + "  " + Model.plainText(modelData.version, 128)
+              + (modelData.installedAt ? " · installed " + Model.plainText(modelData.installedAt, 64) : "")
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.bodySmall
+            elide: Text.ElideRight
+          }
+        }
+      }
+
+      PanelSeparator { foreground: root.foreground }
+      PanelSectionHeader { text: "UPDATE CHECK"; foreground: root.foreground; fontFamily: root.fontFamily }
+
+      Text {
+        textFormat: Text.PlainText
+        width: parent.width
+        text: service.updateCheckStatus === "checking" ? "Checking…"
+          : service.updateCheckStatus === "unavailable" ? "Check unavailable"
+          : service.updateCheckStatus === "ok" && service.updateResults.length > 0
+            ? service.updateResults.join("\n")
+            : service.updateCheckStatus === "ok" ? "No Mullvad updates found" : "Not checked"
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
+      }
+      Text {
+        textFormat: Text.PlainText
+        visible: service.updateCheckedAt > 0
+        width: parent.width
+        text: "Last successful check: " + Qt.formatDateTime(new Date(service.updateCheckedAt), "yyyy-MM-dd HH:mm:ss")
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        elide: Text.ElideRight
+      }
+      Button {
+        text: "Check now"
+        bordered: true
+        enabled: service.packages.length > 0 && service.updateCheckStatus !== "checking"
+        focusable: enabled
+        foreground: root.foreground
+        onClicked: service.checkForUpdates()
       }
     }
   }

@@ -13,11 +13,22 @@ Item {
   readonly property int listenerLineChars: 8192
   property int readTimeoutMs: 10000
   property int actionTimeoutMs: 20000
+  property int updateCheckTimeoutMs: 130000
+  readonly property string packageInfoScript: String(Qt.resolvedUrl("scripts/mullvad-package-info")).replace(/^file:\/\//, "")
+  readonly property string updateCheckScript: String(Qt.resolvedUrl("scripts/mullvad-update-check")).replace(/^file:\/\//, "")
 
   property bool installed: false
   property string cliVersion: ""
   readonly property bool cliVersionSupported: Model.isCliVersionSupported(cliVersion)
   property bool daemonRunning: false
+  property string daemonVersion: ""
+  property var daemonSupported: null
+  property string suggestedUpgrade: ""
+  property int daemonPid: 0
+  property var packages: []
+  property string updateCheckStatus: "never"
+  property double updateCheckedAt: 0
+  property var updateResults: []
   property bool loggedIn: false
   property bool connected: false
   property string disconnectingAction: ""
@@ -77,24 +88,39 @@ Item {
   property string _actionErrorRemainder: ""
   property int _actionOutputLines: 0
   property int _actionOutputChars: 0
+  property var _updateCheckLines: []
+  property var _updateCheckErrorLines: []
+  property string _updateCheckOutputRemainder: ""
+  property string _updateCheckErrorRemainder: ""
+  property int _updateCheckOutputLines: 0
+  property int _updateCheckOutputChars: 0
+  property double _updateCheckAttemptedAt: 0
+  property bool _autoUpdateCheckPending: false
   readonly property bool busy: actionProcess.running || _actionQueue.length > 0
     || readProcess.running || _readQueue.length > 0
   property bool _readWatchdogFired: false
   property bool _actionWatchdogFired: false
+  property bool _updateCheckWatchdogFired: false
   property bool _readOverflowed: false
   property bool _actionOverflowed: false
+  property bool _updateCheckOverflowed: false
   property bool _listenerOverflowed: false
   property int _readWatchdogFiredCount: 0
   property int _actionWatchdogFiredCount: 0
+  property int _updateCheckWatchdogFiredCount: 0
   property int _readOverflowCount: 0
   property int _actionOverflowCount: 0
+  property int _updateCheckOverflowCount: 0
   property int _listenerOverflowCount: 0
   property int _readArmedPid: 0
   property int _actionArmedPid: 0
+  property int _updateCheckArmedPid: 0
   property int _readGen: 0
   property int _readExitedGen: -1
   property int _actionGen: 0
   property int _actionExitedGen: -1
+  property int _updateCheckGen: 0
+  property int _updateCheckExitedGen: -1
 
   function _redact(value) {
     return Model.redact(String(value || ""))
@@ -107,7 +133,7 @@ Item {
   }
 
   function _processForKind(kind) {
-    return kind === "read" ? readProcess : actionProcess
+    return kind === "read" ? readProcess : kind === "action" ? actionProcess : updateCheckProcess
   }
 
   function _resetOutput(kind) {
@@ -177,6 +203,7 @@ Item {
   function _appendReadOutput(line, errorStream) { _appendOutput("read", line, errorStream) }
   function _resetActionOutput() { _resetOutput("action") }
   function _appendActionOutput(line, errorStream) { _appendOutput("action", line, errorStream) }
+  function _resetUpdateCheckOutput() { _resetOutput("updateCheck") }
 
   function _hasRead(kind) {
     if (readProcess.running && _readKind === kind) return true
@@ -207,6 +234,7 @@ Item {
   }
 
   function refreshAll() {
+    _enqueueRead("packageInfo", [packageInfoScript])
     _enqueueRead("probe", ["/usr/bin/env", "mullvad", "--version"])
   }
 
@@ -221,11 +249,15 @@ Item {
     _enqueueRead("dns", ["mullvad", "dns", "get"])
     _enqueueRead("antiCensorship", ["mullvad", "anti-censorship", "get"])
     _enqueueRead("excludedPids", ["mullvad", "split-tunnel", "list"])
+    _enqueueRead("daemonVersion", ["mullvad", "version"])
+    _enqueueRead("daemonPid", ["pgrep", "-x", "mullvad-daemon"])
   }
 
   function refreshStatus() {
-    if (installed) _enqueueRead("status", ["mullvad", "status", "--json"])
-    else refreshAll()
+    if (installed) {
+      _enqueueRead("status", ["mullvad", "status", "--json"])
+      _enqueueRead("daemonPid", ["pgrep", "-x", "mullvad-daemon"])
+    } else refreshAll()
   }
 
   function _applyStatus(raw, seq) {
@@ -278,7 +310,12 @@ Item {
       installed = exitCode === 0
       cliVersion = installed ? Model.parseCliVersion(raw) : ""
       if (!installed) {
+        cliVersion = ""
         daemonRunning = false
+        daemonVersion = ""
+        daemonSupported = null
+        suggestedUpgrade = ""
+        daemonPid = 0
         connected = false
         state = "unavailable"
         statusText = "Mullvad is not installed"
@@ -294,6 +331,25 @@ Item {
     }
 
     var combined = String(raw || "") + "\n" + String(error || "")
+    if (kind === "daemonPid") {
+      var firstPid = String(raw || "").split("\n")[0]
+      daemonPid = exitCode === 0 && /^\d+$/.test(firstPid) ? Number(firstPid) : 0
+      return
+    }
+    if (kind === "daemonVersion" && exitCode !== 0) {
+      daemonVersion = ""
+      daemonSupported = null
+      suggestedUpgrade = ""
+      return
+    }
+    if (kind === "packageInfo" && exitCode !== 0) {
+      _autoUpdateCheckPending = false
+      packages = []
+      updateResults = []
+      updateCheckStatus = "never"
+      updateCheckedAt = 0
+      return
+    }
     if (kind === "status") {
       if (exitCode !== 0) {
         if (root._pendingStatusSeq < root._statusApplySeq) return
@@ -400,6 +456,23 @@ Item {
         else excludedProcesses = []
       } else if (kind === "excludedProcs") {
         excludedProcesses = Model.parseProcessTable(raw)
+      } else if (kind === "daemonVersion") {
+        var daemonInfo = Model.parseDaemonVersion(raw)
+        daemonVersion = String(daemonInfo.version || "")
+        daemonSupported = daemonInfo.supported === true ? true
+          : daemonInfo.supported === false ? false : null
+        suggestedUpgrade = String(daemonInfo.suggestedUpgrade || "")
+      } else if (kind === "packageInfo") {
+        packages = Model.parsePackageInfo(raw)
+        var runAutomaticUpdateCheck = _autoUpdateCheckPending
+        _autoUpdateCheckPending = false
+        if (packages.length === 0) {
+          updateResults = []
+          updateCheckStatus = "never"
+          updateCheckedAt = 0
+        }
+        if (runAutomaticUpdateCheck && packages.length > 0)
+          Qt.callLater(root.checkForUpdates)
       }
     } catch (e) {
       lastError = _shortError(e, "Could not parse Mullvad " + kind)
@@ -619,12 +692,47 @@ Item {
       _runAction("excludedPidDelete", { pid: list[j] }, "Removing excluded process", { quiet: j < list.length - 1 })
   }
 
+  function checkForUpdates() {
+    if (packages.length === 0) return updateCheckStatus
+    if (updateCheckProcess.running || updateCheckStatus === "checking") return updateCheckStatus
+    if (_updateCheckAttemptedAt > 0 && Date.now() - _updateCheckAttemptedAt < 60000)
+      return updateCheckStatus
+    _updateCheckAttemptedAt = Date.now()
+    updateCheckStatus = "checking"
+    _resetUpdateCheckOutput()
+    _updateCheckGen++
+    updateCheckWatchdog.interval = updateCheckTimeoutMs
+    updateCheckWatchdog.restart()
+    updateCheckProcess.command = [updateCheckScript]
+    updateCheckProcess.running = true
+    return updateCheckStatus
+  }
+
+  function refreshPackagesAndCheckUpdates() {
+    _autoUpdateCheckPending = true
+    _enqueueRead("packageInfo", [packageInfoScript])
+  }
+
   Timer {
     interval: Math.max(5000, Math.min(3600000, root.pollInterval))
     repeat: true
     running: true
     triggeredOnStart: true
     onTriggered: root.installed ? root.refreshStatus() : root.refreshAll()
+  }
+
+  Timer {
+    interval: 3600000
+    repeat: true
+    running: true
+    onTriggered: root.refreshPackagesAndCheckUpdates()
+  }
+
+  Timer {
+    interval: 60000
+    running: true
+    repeat: false
+    onTriggered: root.refreshPackagesAndCheckUpdates()
   }
 
   Timer {
@@ -903,6 +1011,77 @@ Item {
     onExited: function(exitCode, exitStatus) {
       root._actionExitedGen = root._actionGen
       root._finalizeAction(exitCode, exitStatus, "")
+    }
+  }
+
+  Timer {
+    id: updateCheckWatchdog
+    repeat: false
+    onTriggered: {
+      if (!updateCheckProcess.running) return
+      root._updateCheckWatchdogFired = true
+      root._updateCheckWatchdogFiredCount++
+      updateCheckProcess.signal(15)
+      updateCheckKillTimer.restart()
+    }
+  }
+
+  Timer {
+    id: updateCheckKillTimer
+    interval: 1000
+    repeat: false
+    onTriggered: {
+      if (updateCheckProcess.running && updateCheckProcess.processId === root._updateCheckArmedPid)
+        updateCheckProcess.signal(9)
+    }
+  }
+
+  function _finalizeUpdateCheck(exitCode, exitStatus, startError) {
+    updateCheckWatchdog.stop()
+    updateCheckKillTimer.stop()
+    _flushOutputRemainders("updateCheck")
+    if (startError || _updateCheckWatchdogFired || _updateCheckOverflowed) {
+      _updateCheckWatchdogFired = false
+      updateCheckStatus = "unavailable"
+      return
+    }
+    var effectiveCode = exitStatus === 1 && exitCode === 0 ? 1 : exitCode
+    if (effectiveCode !== 0) {
+      updateCheckStatus = "unavailable"
+      return
+    }
+    updateResults = Model.parseUpdateCheck(_updateCheckLines.join("\n"))
+    updateCheckedAt = Date.now()
+    updateCheckStatus = "ok"
+  }
+
+  Process {
+    id: updateCheckProcess
+    command: []
+    running: false
+    onStarted: root._updateCheckArmedPid = processId
+    onRunningChanged: {
+      if (!running && root._updateCheckGen > 0) {
+        var generation = root._updateCheckGen
+        Qt.callLater(function() {
+          if (root._updateCheckGen === generation && root._updateCheckExitedGen !== generation) {
+            root._updateCheckExitedGen = generation
+            root._finalizeUpdateCheck(127, 0, "failed to start")
+          }
+        })
+      }
+    }
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) { root._appendOutputChunk("updateCheck", chunk, false) }
+    }
+    stderr: SplitParser {
+      splitMarker: ""
+      onRead: function(chunk) { root._appendOutputChunk("updateCheck", chunk, true) }
+    }
+    onExited: function(exitCode, exitStatus) {
+      root._updateCheckExitedGen = root._updateCheckGen
+      root._finalizeUpdateCheck(exitCode, exitStatus, "")
     }
   }
 }

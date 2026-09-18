@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Read bounded metadata for the two known Mullvad packages.
+set -uo pipefail
+
+local_db="${MULLVAD_PACMAN_LOCAL_DB:-${PACMAN_LOCAL_DIR:-/var/lib/pacman/local}}"
+
+field() {
+  local marker="$1" content="$2"
+  awk -v marker="%$marker%" 'length($0) > 4096 { $0 = substr($0, 1, 4096) }
+    $0 == marker { wanted = 1; next }
+    wanted { gsub(/<[^>]*>/, " "); gsub(/[[:cntrl:]<>]/, " "); gsub(/[[:space:]]+/, " "); sub(/^ /, ""); sub(/ $/, ""); print substr($0, 1, 256); exit }' <<<"$content"
+}
+
+for package in mullvad-vpn mullvad-vpn-daemon; do
+  desc_file=""
+  for candidate in "$local_db/$package"-[0-9]*/desc; do
+    [[ -f "$candidate" ]] || continue
+    desc_file="$candidate"
+    break
+  done
+  [[ -n "$desc_file" ]] || continue
+
+  content="$(head -c 65536 -- "$desc_file" 2>/dev/null)" || continue
+  name="$(field NAME "$content")"
+  version="$(field VERSION "$content")"
+  description="$(field DESC "$content")"
+  installed_epoch="$(field INSTALLDATE "$content")"
+  [[ "$name" == "$package" && -n "$version" ]] || continue
+  installed_at=""
+  if [[ "$installed_epoch" =~ ^[0-9]{1,12}$ ]] && (( installed_epoch > 0 )); then
+    installed_at="$(date --date="@$installed_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || true)"
+  fi
+  printf '%s\t%s\t%s\t%s\n' "$package" "${version:0:128}" "${description:0:256}" "${installed_at:0:64}"
+done

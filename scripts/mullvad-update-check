@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Run the read-only Arch update checker and report only Mullvad packages.
+set -uo pipefail
+
+timeout_seconds="${MULLVAD_UPDATE_CHECK_TIMEOUT:-120}"
+[[ "$timeout_seconds" =~ ^[0-9]{1,4}$ ]] || timeout_seconds=120
+(( timeout_seconds >= 1 && timeout_seconds <= 900 )) || timeout_seconds=120
+
+tmp="$(mktemp)" || exit 3
+child=0
+cleanup() { rm -f -- "$tmp"; }
+stop_child() {
+  if (( child > 0 )); then
+    kill -TERM -- "-$child" 2>/dev/null || true
+    sleep 0.2
+    kill -KILL -- "-$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+  fi
+  cleanup
+  exit 143
+}
+trap cleanup EXIT
+trap stop_child TERM INT
+
+(
+  ulimit -f 128
+  exec setsid timeout --signal=TERM --kill-after=1 "$timeout_seconds" checkupdates >"$tmp" 2>/dev/null
+) &
+child=$!
+wait "$child"
+status=$?
+child=0
+trap - TERM INT
+
+case "$status" in
+  0) ;;
+  2) exit 0 ;;
+  *) exit 3 ;;
+esac
+
+awk '
+  BEGIN { count = 0; chars = 0 }
+  ($1 == "mullvad-vpn" || $1 == "mullvad-vpn-daemon") && count < 2 {
+    line = substr($1, 1, 64) " " substr($2, 1, 128) " -> " substr($4, 1, 128)
+    if (chars + length(line) + 1 <= 4096) { print line; chars += length(line) + 1; count++ }
+  }
+' "$tmp"

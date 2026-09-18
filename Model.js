@@ -16,6 +16,7 @@ var MAX_EXCLUDED_PIDS = 256;
 var MAX_DESKTOP_ENTRIES = 4096;
 var MAX_DESKTOP_KEYWORDS = 64;
 var SUPPORTED_CLI_SERIES = ["2026.4"];
+var SYSTEM_PACKAGE_NAMES = { "mullvad-vpn": true, "mullvad-vpn-daemon": true };
 
 function text(value) {
     return value === undefined || value === null ? "" : String(value);
@@ -60,6 +61,51 @@ function parseCliVersion(raw) {
 function isCliVersionSupported(version) {
     var match = plainText(version, 32).match(/^(\d+\.\d+)(?:\.\d+)?$/);
     return match !== null && SUPPORTED_CLI_SERIES.indexOf(match[1]) !== -1;
+}
+
+function parseDaemonVersion(raw) {
+    var input = boundedInput(raw, 4096);
+    var version = input.match(/^\s*Current version\s*:\s*(.+?)\s*$/im);
+    var supported = input.match(/^\s*(?:Is )?Supported\s*:\s*(\S+)/im);
+    var upgrade = input.match(/^\s*Suggested upgrade\s*:\s*(.+?)\s*$/im);
+    var upgradeValue = upgrade ? plainText(upgrade[1], 64) : "";
+    if (/^none$/i.test(upgradeValue)) upgradeValue = "";
+    return {
+        version: version ? plainText(version[1], 64) : "",
+        supported: supported ? /^(true|yes)$/i.test(supported[1]) : null,
+        suggestedUpgrade: upgradeValue
+    };
+}
+
+function parsePackageInfo(raw) {
+    var result = [];
+    var lines = boundedLines(raw, 16, 16384);
+    for (var i = 0; i < lines.length && result.length < 2; ++i) {
+        var fields = lines[i].split("\t");
+        var name = text(fields[0]).trim();
+        if (fields.length < 4 || !SYSTEM_PACKAGE_NAMES[name]) continue;
+        var version = plainText(fields[1], 128);
+        if (!version) continue;
+        result.push({
+            name: name,
+            version: version,
+            description: plainText(fields[2], 256),
+            installedAt: plainText(fields[3], 64)
+        });
+    }
+    return result;
+}
+
+function parseUpdateCheck(raw) {
+    var result = [];
+    var lines = boundedLines(raw, 16, 4096);
+    for (var i = 0; i < lines.length && result.length < 2; ++i) {
+        var line = plainText(lines[i], 512);
+        var match = line.match(/^(mullvad-vpn(?:-daemon)?)\s+(\S+)\s+-?>?\s+(\S+)$/);
+        if (match && SYSTEM_PACKAGE_NAMES[match[1]])
+            result.push(match[1] + " " + plainText(match[2], 128) + " -> " + plainText(match[3], 128));
+    }
+    return result;
 }
 
 function parseJsonLines(raw) {
@@ -979,6 +1025,9 @@ var api = {
     SUPPORTED_CLI_SERIES: SUPPORTED_CLI_SERIES,
     parseCliVersion: parseCliVersion,
     isCliVersionSupported: isCliVersionSupported,
+    parseDaemonVersion: parseDaemonVersion,
+    parsePackageInfo: parsePackageInfo,
+    parseUpdateCheck: parseUpdateCheck,
     parseStatus: parseStatus,
     isTunnelStateEvent: isTunnelStateEvent,
     parseRelayList: parseRelayList,
