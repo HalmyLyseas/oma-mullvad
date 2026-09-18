@@ -46,6 +46,17 @@ Item {
   // own keyCatcher so j/k inside the popup don't double-drive the panel
   // cursor.
   readonly property bool popupOpen: popup.opened
+  readonly property bool triggerFocused: trigger.activeFocus
+  readonly property bool popupFocused: optionList.activeFocus
+  readonly property int _probeCurrentIndex: optionList.currentIndex
+  function _probeOptionItem(index) { return optionList.itemAtIndex(index) }
+  function _probeOptionHitTarget(index) {
+    var item = optionList.itemAtIndex(index)
+    if (!item) return null
+    for (var i = 0; i < item.children.length; i++)
+      if (item.children[i].objectName === "optionHitTarget") return item.children[i]
+    return null
+  }
   function open() { popup.open() }
   function close() { popup.close() }
   function toggle() { popup.opened ? popup.close() : popup.open() }
@@ -241,11 +252,15 @@ Item {
             }
 
             MouseArea {
+              objectName: "optionHitTarget"
               anchors.fill: parent
               hoverEnabled: true
               cursorShape: Qt.PointingHandCursor
               onPositionChanged: optionList.currentIndex = parent.index
-              onClicked: optionList.selectCurrent()
+              onClicked: {
+                optionList.currentIndex = parent.index
+                optionList.selectCurrent()
+              }
             }
           }
         }

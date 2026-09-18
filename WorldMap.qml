@@ -12,6 +12,8 @@ Item {
   property color foreground: Color.foreground
   property color accent: Color.accent
 
+  signal locationSelected(var location)
+
   readonly property real projectionScale: Math.min(width / 1000, height / 500)
 
   function pointX(point) {
@@ -20,6 +22,11 @@ Item {
 
   function pointY(point) {
     return point ? (90 - Number(point.latitude)) * 500 / 180 : 0
+  }
+
+  function _probeMarkerHitTarget(index) {
+    var marker = locationRepeater.itemAt(index)
+    return marker && marker.children.length ? marker.children[0] : null
   }
 
   clip: true
@@ -46,6 +53,7 @@ Item {
     }
 
     Repeater {
+      id: locationRepeater
       model: root.locations || []
 
       Rectangle {
@@ -57,6 +65,14 @@ Item {
         height: width
         radius: width / 2
         color: Util.alpha(root.foreground, 0.52)
+
+        MouseArea {
+          anchors.centerIn: parent
+          width: 20
+          height: 20
+          cursorShape: Qt.PointingHandCursor
+          onClicked: root.locationSelected(parent.modelData)
+        }
       }
     }
 

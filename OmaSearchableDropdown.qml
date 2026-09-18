@@ -52,6 +52,8 @@ Item {
   // suspend its own keyCatcher so typing into the filter doesn't drive
   // the panel cursor.
   readonly property bool popupOpen: popup.opened
+  readonly property bool triggerFocused: trigger.activeFocus
+  readonly property bool popupFocused: searchField.activeFocus || resultList.activeFocus
   function open() { popup.open() }
   function close() { popup.close() }
   function toggle() { popup.opened ? popup.close() : popup.open() }
@@ -370,7 +372,10 @@ Item {
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor
                   onPositionChanged: resultList.currentIndex = parent.index
-                  onClicked: resultList.selectCurrent()
+                  onClicked: {
+                    resultList.currentIndex = parent.index
+                    resultList.selectCurrent()
+                  }
                 }
               }
             }

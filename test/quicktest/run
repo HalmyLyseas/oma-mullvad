@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+trusted_system_path=/usr/bin:/bin
+PATH="$trusted_system_path"
+quicktest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+plugin_dir="$(cd "$quicktest_dir/../.." && pwd)"
+omarchy_shell_dir="${OMARCHY_SHELL_DIR:-/usr/share/omarchy/shell}"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+
+qmltestrunner_bin="$(PATH="$trusted_system_path" command -v qmltestrunner || true)"
+if [[ -z "$qmltestrunner_bin" && -x /usr/lib/qt6/bin/qmltestrunner ]]; then
+  qmltestrunner_bin=/usr/lib/qt6/bin/qmltestrunner
+fi
+[[ -n "$qmltestrunner_bin" && -x "$qmltestrunner_bin" ]] || {
+  echo "physical input suite requires qmltestrunner (Arch: qt6-declarative)" >&2
+  exit 1
+}
+timeout_bin="$(PATH="$trusted_system_path" command -v timeout || true)"
+system_pgrep="$(PATH="$trusted_system_path" command -v pgrep || true)"
+[[ -n "$timeout_bin" ]] || { echo "physical input suite requires timeout" >&2; exit 1; }
+[[ -n "$system_pgrep" ]] || { echo "physical input suite requires pgrep" >&2; exit 1; }
+
+mkdir -p "$scratch/qmlroot/qs/Ui" "$scratch/bin" "$scratch/runtime"
+chmod 700 "$scratch/runtime"
+ln -s "$omarchy_shell_dir/Commons" "$scratch/qmlroot/qs/Commons" || exit 1
+for file in "$omarchy_shell_dir/Ui/"*; do
+  name="${file##*/}"
+  ln -s "$file" "$scratch/qmlroot/qs/Ui/$name" || exit 1
+done
+rm "$scratch/qmlroot/qs/Ui/Panel.qml" "$scratch/qmlroot/qs/Ui/KeyboardPanel.qml" || exit 1
+ln -s "$quicktest_dir/host/Panel.qml" "$scratch/qmlroot/qs/Ui/Panel.qml" || exit 1
+ln -s "$quicktest_dir/host/KeyboardPanel.qml" "$scratch/qmlroot/qs/Ui/KeyboardPanel.qml" || exit 1
+for executable in mullvad mullvad-exclude ps pgrep checkupdates touch; do
+  ln -s "$plugin_dir/test/mocks/$executable" "$scratch/bin/$executable" || exit 1
+  resolved="$(PATH="$scratch/bin" command -v "$executable")" || exit 1
+  [[ "$(readlink -f "$resolved")" == "$(readlink -f "$plugin_dir/test/mocks/$executable")" ]] || {
+    echo "unsafe executable boundary: $executable -> $resolved" >&2
+    exit 1
+  }
+done
+for executable in bash dirname readlink sleep head rm mktemp; do
+  helper="$(PATH="$trusted_system_path" command -v "$executable" || true)"
+  [[ -n "$helper" ]] || { echo "required isolated helper missing: $executable" >&2; exit 1; }
+  ln -s "$helper" "$scratch/bin/$executable" || exit 1
+  [[ "$(readlink -f "$scratch/bin/$executable")" == "$(readlink -f "$helper")" ]] || exit 1
+done
+
+wayland_display="${WAYLAND_DISPLAY:-}"
+if [[ -n "$wayland_display" && "$wayland_display" != /* ]]; then
+  wayland_display="${XDG_RUNTIME_DIR:?WAYLAND_DISPLAY requires XDG_RUNTIME_DIR}/$wayland_display"
+fi
+log="$scratch/qmltestrunner.log"
+: > "$scratch/mock.log"
+MULLVAD_MOCK_LOG="$scratch/mock.log" \
+MULLVAD_PLUGIN_DIR="$plugin_dir" \
+QML_IMPORT_PATH="$quicktest_dir/imports:$scratch/qmlroot" \
+PATH="$scratch/bin" \
+XDG_RUNTIME_DIR="$scratch/runtime" \
+WAYLAND_DISPLAY="$wayland_display" \
+QT_QUICK_BACKEND="${QT_QUICK_BACKEND:-software}" \
+"$timeout_bin" 45 "$qmltestrunner_bin" -input "$quicktest_dir" \
+  -import "$quicktest_dir/imports" -import "$scratch/qmlroot" -o -,txt >"$log" 2>&1
+command_status=$?
+if [[ "$command_status" -ne 0 ]]; then
+  echo "physical Qt Quick Tests failed (status $command_status)" >&2
+  head -c 65536 "$log" >&2
+  exit 1
+fi
+if "$system_pgrep" -f "$scratch/bin/(mullvad|mullvad-exclude|checkupdates)" >/dev/null; then
+  echo "physical Qt Quick Tests left live mock children" >&2
+  "$system_pgrep" -af "$scratch/bin/(mullvad|mullvad-exclude|checkupdates)" | head -c 65536 >&2
+  exit 1
+fi
+head -c 65536 "$log"
