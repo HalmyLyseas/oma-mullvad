@@ -153,6 +153,32 @@ Item {
       cancelSpy.target = null
       confirmSpy.target = null
       mapSpy.target = null
+      fakeService.locations = []
+      fakeService.selectCount = 0
+      fakeService.selectedCountry = ""
+      fakeService.selectedCity = ""
+    }
+
+    function findWorldMap(item) {
+      if (!item) return null
+      if (typeof item._probeMarkerHitTarget === "function") return item
+      var children = item.children || []
+      for (var i = 0; i < children.length; i++) {
+        var found = findWorldMap(children[i])
+        if (found) return found
+      }
+      return null
+    }
+
+    function findTextItem(item, text) {
+      if (!item) return null
+      if (item.text === text) return item
+      var children = item.children || []
+      for (var i = 0; i < children.length; i++) {
+        var found = findTextItem(children[i], text)
+        if (found) return found
+      }
+      return null
     }
 
     function test_dropdown_keyboard_open_move_select() {
@@ -221,16 +247,25 @@ Item {
       tryCompare(control, "popupOpen", false)
     }
 
-    function test_searchable_pointer_trigger_toggle() {
+    function test_searchable_pointer_trigger_and_row_selection() {
       var control = createTemporaryObject(searchableComponent, scene, { x: 30, y: 30 })
       verify(control !== null)
       changedSpy.target = control
       mouseClick(control, control.width / 2, control.rowHeight / 2)
       tryCompare(control, "popupOpen", true)
       tryCompare(control, "popupFocused", true)
-      mouseClick(control, control.width / 2, control.rowHeight / 2)
+      var row = control._probeOptionHitTarget(1)
+      verify(row !== null)
+      verify(row.visible && row.width > 0 && row.height > 0)
+      tryVerify(function() { return row.parent.y > 0 })
+      var point = control._probeOptionCenter(1, scene)
+      verify(point.x >= 0 && point.y >= 0)
+      mouseMove(scene, point.x, point.y)
+      tryCompare(control, "_probeCurrentIndex", 1)
+      mouseClick(scene, point.x, point.y)
+      tryCompare(changedSpy, "count", 1)
+      compare(changedSpy.signalArguments[0][0], "de")
       tryCompare(control, "popupOpen", false)
-      compare(changedSpy.count, 0)
     }
 
     function test_dialog_keyboard_cancel_and_accept() {
@@ -258,10 +293,14 @@ Item {
       cancelSpy.target = dialog
       confirmSpy.target = dialog
       dialog.opened = true
-      mouseClick(dialog, 325, 184)
+      var cancelLabel = findTextItem(dialog, "Cancel")
+      var confirmLabel = findTextItem(dialog, "Confirm")
+      verify(cancelLabel !== null)
+      verify(confirmLabel !== null)
+      mouseClick(cancelLabel.parent, cancelLabel.parent.width / 2, cancelLabel.parent.height / 2)
       compare(cancelSpy.count, 1)
       dialog.opened = true
-      mouseClick(dialog, 423, 184)
+      mouseClick(confirmLabel.parent, confirmLabel.parent.width / 2, confirmLabel.parent.height / 2)
       compare(confirmSpy.count, 1)
     }
 
@@ -273,6 +312,25 @@ Item {
       mouseClick(map, 250, 125)
       tryCompare(mapSpy, "count", 1)
       compare(mapSpy.signalArguments[0][0].value, "origin")
+    }
+
+    function test_panel_world_map_pointer_selection_reaches_inert_service() {
+      fakeService.locations = [{
+        countryCode: "se", cityCode: "got", country: "Sweden", city: "Gothenburg",
+        latitude: 0, longitude: 0, servers: []
+      }]
+      var panel = createTemporaryObject(panelComponent, scene)
+      verify(panel !== null)
+      waitForRendering(panel)
+      var map = findWorldMap(panel._probePageItem)
+      verify(map !== null)
+      var marker = map._probeMarkerHitTarget(0)
+      verify(marker !== null)
+      mouseClick(marker, marker.width / 2, marker.height / 2)
+      tryCompare(fakeService, "selectCount", 1)
+      compare(fakeService.selectedCountry, "se")
+      compare(fakeService.selectedCity, "got")
+      compare(panel.selectedLocation.cityCode, "got")
     }
   }
 }

@@ -7,7 +7,20 @@ quicktest_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin_dir="$(cd "$quicktest_dir/../.." && pwd)"
 omarchy_shell_dir="${OMARCHY_SHELL_DIR:-/usr/share/omarchy/shell}"
 scratch="$(mktemp -d)"
-trap 'rm -rf "$scratch"' EXIT
+command_pid=""
+cleanup() {
+  local status=$?
+  trap - EXIT INT TERM HUP
+  if [[ -n "$command_pid" ]]; then
+    kill -TERM -- "-$command_pid" 2>/dev/null || true
+    sleep 0.2
+    kill -KILL -- "-$command_pid" 2>/dev/null || true
+    wait "$command_pid" 2>/dev/null || true
+  fi
+  rm -rf "$scratch"
+  exit "$status"
+}
+trap cleanup EXIT INT TERM HUP
 
 qmltestrunner_bin="$(PATH="$trusted_system_path" command -v qmltestrunner || true)"
 if [[ -z "$qmltestrunner_bin" && -x /usr/lib/qt6/bin/qmltestrunner ]]; then
@@ -22,7 +35,8 @@ system_pgrep="$(PATH="$trusted_system_path" command -v pgrep || true)"
 [[ -n "$timeout_bin" ]] || { echo "physical input suite requires timeout" >&2; exit 1; }
 [[ -n "$system_pgrep" ]] || { echo "physical input suite requires pgrep" >&2; exit 1; }
 
-mkdir -p "$scratch/qmlroot/qs/Ui" "$scratch/bin" "$scratch/runtime"
+mkdir -p "$scratch/qmlroot/qs/Ui" "$scratch/bin" "$scratch/runtime" \
+  "$scratch/home" "$scratch/config" "$scratch/cache" "$scratch/data"
 chmod 700 "$scratch/runtime"
 ln -s "$omarchy_shell_dir/Commons" "$scratch/qmlroot/qs/Commons" || exit 1
 for file in "$omarchy_shell_dir/Ui/"*; do
@@ -52,25 +66,55 @@ if [[ -n "$wayland_display" && "$wayland_display" != /* ]]; then
   wayland_display="${XDG_RUNTIME_DIR:?WAYLAND_DISPLAY requires XDG_RUNTIME_DIR}/$wayland_display"
 fi
 log="$scratch/qmltestrunner.log"
+orphan_log="$scratch/orphans.log"
+orphan_pids="$scratch/orphan-pids"
 : > "$scratch/mock.log"
-MULLVAD_MOCK_LOG="$scratch/mock.log" \
+env -i HOME="$scratch/home" \
+LANG=C.UTF-8 \
 MULLVAD_PLUGIN_DIR="$plugin_dir" \
+MULLVAD_MOCK_LOG="$scratch/mock.log" \
 QML_IMPORT_PATH="$quicktest_dir/imports:$scratch/qmlroot" \
 PATH="$scratch/bin" \
+QT_QPA_PLATFORM=wayland \
+QT_QUICK_BACKEND=software \
+XDG_CACHE_HOME="$scratch/cache" \
+XDG_CONFIG_HOME="$scratch/config" \
+XDG_DATA_HOME="$scratch/data" \
 XDG_RUNTIME_DIR="$scratch/runtime" \
 WAYLAND_DISPLAY="$wayland_display" \
-QT_QUICK_BACKEND="${QT_QUICK_BACKEND:-software}" \
-"$timeout_bin" 45 "$qmltestrunner_bin" -input "$quicktest_dir" \
-  -import "$quicktest_dir/imports" -import "$scratch/qmlroot" -o -,txt >"$log" 2>&1
+"$timeout_bin" --kill-after=5s 45s "$qmltestrunner_bin" -input "$quicktest_dir" \
+  -import "$quicktest_dir/imports" -import "$scratch/qmlroot" -o -,txt >"$log" 2>&1 &
+command_pid=$!
+wait "$command_pid"
 command_status=$?
+: > "$orphan_log"
+: > "$orphan_pids"
+orphan_status=1
+if "$system_pgrep" -a -g "$command_pid" >"$orphan_log" 2>&1; then
+  "$system_pgrep" -g "$command_pid" >>"$orphan_pids" 2>/dev/null || true
+  orphan_status=0
+fi
+if "$system_pgrep" -af "$scratch/bin/(mullvad|mullvad-exclude|checkupdates)" >>"$orphan_log" 2>&1; then
+  "$system_pgrep" -f "$scratch/bin/(mullvad|mullvad-exclude|checkupdates)" >>"$orphan_pids" 2>/dev/null || true
+  orphan_status=0
+fi
+if [[ "$orphan_status" -eq 0 ]]; then
+  echo "physical Qt Quick Tests left live test children (mock processes)" >&2
+  head -c 65536 "$orphan_log" >&2
+  while IFS= read -r pid; do
+    [[ "$pid" =~ ^[0-9]+$ ]] && kill -TERM "$pid" 2>/dev/null || true
+  done < "$orphan_pids"
+  sleep 0.2
+  while IFS= read -r pid; do
+    [[ "$pid" =~ ^[0-9]+$ ]] && kill -KILL "$pid" 2>/dev/null || true
+  done < "$orphan_pids"
+  command_pid=""
+  exit 1
+fi
+command_pid=""
 if [[ "$command_status" -ne 0 ]]; then
   echo "physical Qt Quick Tests failed (status $command_status)" >&2
   head -c 65536 "$log" >&2
-  exit 1
-fi
-if "$system_pgrep" -f "$scratch/bin/(mullvad|mullvad-exclude|checkupdates)" >/dev/null; then
-  echo "physical Qt Quick Tests left live mock children" >&2
-  "$system_pgrep" -af "$scratch/bin/(mullvad|mullvad-exclude|checkupdates)" | head -c 65536 >&2
   exit 1
 fi
 head -c 65536 "$log"

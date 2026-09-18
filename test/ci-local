@@ -50,6 +50,7 @@ clean_archive() {
     echo "clean archive missing test/quicktest/tst_physical_input.qml" >&2
     return 1
   }
+  bash -n "$archive_dir/test/quicktest/run" || return 1
   command -v qs >/dev/null || { echo "clean archive requires qs" >&2; return 1; }
   node --check "$archive_dir/test/probe/collect-result.mjs" || return 1
   node --check "$archive_dir/test/cli-contract.mjs" || return 1

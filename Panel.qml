@@ -731,6 +731,9 @@ Panel {
           connectedPoint: root.connectedMapLocation()
           foreground: root.foreground
           accent: root.accent
+          onLocationSelected: function(location) {
+            root.chooseLocation(location, service.active)
+          }
         }
       }
 

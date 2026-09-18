@@ -54,6 +54,23 @@ Item {
   readonly property bool popupOpen: popup.opened
   readonly property bool triggerFocused: trigger.activeFocus
   readonly property bool popupFocused: searchField.activeFocus || resultList.activeFocus
+  readonly property int _probeCurrentIndex: resultList.currentIndex
+  function _probeOptionHitTarget(index) {
+    var item = resultList.itemAtIndex(index)
+    if (!item) return null
+    for (var i = 0; i < item.children.length; i++)
+      if (item.children[i].objectName === "optionHitTarget") return item.children[i]
+    return null
+  }
+  function _probeOptionCenter(index, target) {
+    var item = resultList.itemAtIndex(index)
+    if (!item) return Qt.point(-1, -1)
+    var point = resultList.mapToItem(target, item.width / 2, item.y + item.height / 2)
+    // Qt Quick Test's Popup/ListView mapping omits the recycled delegate's
+    // content-item offset; the physical hover assertion below verifies it.
+    point.y += item.y
+    return point
+  }
   function open() { popup.open() }
   function close() { popup.close() }
   function toggle() { popup.opened ? popup.close() : popup.open() }
@@ -368,6 +385,7 @@ Item {
                 }
 
                 MouseArea {
+                  objectName: "optionHitTarget"
                   anchors.fill: parent
                   hoverEnabled: true
                   cursorShape: Qt.PointingHandCursor

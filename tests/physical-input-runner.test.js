@@ -23,6 +23,8 @@ test("physical Qt Quick Test runner keeps a verified allowlisted PATH", () => {
     assert.doesNotMatch(runner, /PATH="\$[^"\n]*:\$PATH"/);
     assert.match(runner, /readlink -f/);
     assert.match(runner, /plugin_dir\/test\/mocks\/\$executable/);
+    assert.match(runner, /env -i/);
+    assert.doesNotMatch(runner, /LD_PRELOAD|LD_LIBRARY_PATH|QT_PLUGIN_PATH|QML2_IMPORT_PATH/);
 });
 
 test("physical Qt Quick Test runner preserves an inherited Wayland socket", () => {
@@ -35,8 +37,15 @@ test("physical Qt Quick Test runner bounds diagnostics and rejects timeout or fa
     const runner = source("test/quicktest/run");
     assert.match(runner, /command_status=\$\?/);
     assert.match(runner, /head -c 65536/);
-    assert.match(runner, /timeout/);
-    assert.match(runner, /pgrep/);
+    assert.match(runner, /--kill-after/);
+    assert.match(runner, /pgrep[^\n]*-g/);
+    assert.match(runner, /trap[^\n]*(?:INT|TERM|HUP)/);
+    assert.match(runner, /kill -TERM/);
+    assert.match(runner, /kill -KILL/);
+    const orphanCheck = runner.indexOf("left live test children");
+    const failureCheck = runner.indexOf("physical Qt Quick Tests failed");
+    assert.ok(orphanCheck >= 0 && orphanCheck < failureCheck,
+        "orphan rejection must run even when qmltestrunner fails or times out");
 });
 
 test("the main and clean-archive gates inventory physical Qt Quick Tests", () => {
@@ -44,6 +53,7 @@ test("the main and clean-archive gates inventory physical Qt Quick Tests", () =>
     const gate = source("test/ci-local");
     assert.match(gate, /test\/quicktest\/run/);
     assert.match(gate, /test\/quicktest\/tst_physical_input\.qml/);
+    assert.match(gate, /archive_dir\/test\/quicktest\/run/);
 });
 
 test("CI installs the Arch qmltestrunner provider for both exact Omarchy versions", () => {
