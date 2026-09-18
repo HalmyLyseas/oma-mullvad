@@ -17,12 +17,15 @@ ln -s /usr/share/omarchy/shell "$scratch/qmlroot/qs"
 ln -s "$plugin_dir/test/mocks/mullvad" "$scratch/bin/mullvad"
 ln -s "$plugin_dir/test/mocks/ps" "$scratch/bin/ps"
 
-field() {
-  node -e 'const v=JSON.parse(process.argv[1])[process.argv[2]]; process.stdout.write(v == null ? "" : String(v))' "$1" "$2"
-}
-
-check() {
-  if eval "$1"; then printf 'ok - %s\n' "$2"; else printf 'not ok - %s\n' "$2"; failures=$((failures + 1)); fi
+check_json() {
+  local json="$1" label="$2"
+  shift 2
+  if node "$probe_dir/json-assert.mjs" "$json" "$@"; then
+    printf 'ok - %s\n' "$label"
+  else
+    printf 'not ok - %s\n' "$label"
+    failures=$((failures + 1))
+  fi
 }
 
 run_case() {
@@ -40,65 +43,66 @@ run_case() {
 }
 
 json="$(run_case state-icons)"
-check "[[ -n '$json' && -z \"$(field "$json" note)\" ]]" "real BarWidget and Panel instantiate without engine errors"
-check "[[ \"$(field "$json" panelLoaded)\" == true && \"$(field "$json" panelServiceMatches)\" == true ]]" "Panel receives the singleton service"
-check "[[ \"$(field "$json" connectedIcon)\" == connected && \"$(field "$json" errorIcon)\" == error ]]" "bar icon follows service truth"
-check "[[ \"$(field "$json" errorTooltip)\" == *error* ]]" "error state reaches the bar tooltip"
+check_json "$json" "real BarWidget and Panel instantiate without engine errors" note empty ignored
+check_json "$json" "Panel receives the singleton service" panelLoaded eq true panelServiceMatches eq true
+check_json "$json" "bar icon follows service truth" connectedIcon eq connected errorIcon eq error
+check_json "$json" "error state reaches the bar tooltip" errorTooltip contains error
 
 json="$(run_case lifecycle)"
-check "[[ -n '$json' && -z \"$(field "$json" note)\" ]]" "service-null lifecycle completes without engine errors"
-check "[[ \"$(field "$json" firstPanelLoaded)\" == true ]]" "Panel exists while the service exists"
-check "[[ \"$(field "$json" loaderInactive)\" == true && \"$(field "$json" loaderStatusNull)\" == true ]]" "Panel Loader deactivates when the service disappears"
-check "[[ \"$(field "$json" panelDestroyed)\" == true ]]" "stale Panel is destroyed"
+check_json "$json" "service-null lifecycle completes without engine errors" note empty ignored
+check_json "$json" "Panel exists while the service exists" firstPanelLoaded eq true
+check_json "$json" "Panel Loader deactivates when the service disappears" loaderInactive eq true loaderStatusNull eq true
+check_json "$json" "stale Panel is destroyed" panelDestroyed eq true
 
 json="$(run_case widget-reload)"
-check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" sameService)\" == true ]]" "widget reload preserves the keepLoaded service instance"
-check "[[ \"$(field "$json" panelServiceMatches)\" == true ]]" "reloaded widget injects the retained service into its panel"
+check_json "$json" "widget reload preserves the keepLoaded service instance" note empty ignored sameService eq true
+check_json "$json" "reloaded widget injects the retained service into its panel" panelServiceMatches eq true
 
 json="$(run_case replacement-bar)"
-check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" panelDestroyed)\" == true ]]" "replacement bar without service access destroys the panel"
-check "[[ \"$(field "$json" unavailableTooltip)\" == 'Mullvad controls unavailable in this bar' ]]" "replacement bar renders an explicit unavailable state"
+check_json "$json" "replacement bar without service access destroys the panel" note empty ignored panelDestroyed eq true
+check_json "$json" "replacement bar renders an explicit unavailable state" unavailableTooltip eq 'Mullvad controls unavailable in this bar'
 
 json="$(run_case facade-contract)"
-check "[[ \"$(field "$json" ownService)\" == true && \"$(field "$json" foreignServiceNull)\" == true && \"$(field "$json" appLibraryNull)\" == true ]]" "scoped facade exposes only the plugin service"
-check "[[ \"$(field "$json" foreignUpdateIgnored)\" == true && \"$(field "$json" ownUpdateRecorded)\" == true ]]" "scoped facade accepts only own-ID settings updates"
-check "[[ \"$(field "$json" scalarPropertiesUsable)\" == true && \"$(field "$json" popupOwned)\" == true && \"$(field "$json" popupReleased)\" == true ]]" "scalar bar and popup ownership APIs remain usable"
+check_json "$json" "scoped facade exposes only the plugin service" ownService eq true foreignServiceNull eq true appLibraryNull eq true
+check_json "$json" "scoped facade accepts only own-ID settings updates" foreignUpdateIgnored eq true ownUpdateRecorded eq true
+check_json "$json" "scalar bar and popup ownership APIs remain usable" scalarPropertiesUsable eq true popupOwned eq true popupReleased eq true
 
 json="$(run_case availability-cli)"
-check "[[ \"$(field "$json" cliReady)\" == false && \"$(field "$json" overviewAvailable)\" == true ]]" "Overview remains available without the CLI"
-check "[[ \"$(field "$json" locationsAvailable)\" == false && \"$(field "$json" advancedAvailable)\" == false && \"$(field "$json" excludedAvailable)\" == false ]]" "CLI-dependent pages lock without the CLI"
-check "[[ \"$(field "$json" selectedPage)\" == 0 && \"$(field "$json" barTooltip)\" == *not\ installed* ]]" "unavailable CLI cannot navigate away from Overview"
+check_json "$json" "Overview remains available without the CLI" cliReady eq false overviewAvailable eq true
+check_json "$json" "CLI-dependent pages lock without the CLI" locationsAvailable eq false advancedAvailable eq false excludedAvailable eq false
+check_json "$json" "unavailable CLI cannot navigate away from Overview" selectedPage eq 0 barTooltip contains 'not installed'
 
 json="$(run_case availability-daemon)"
-check "[[ \"$(field "$json" cliReady)\" == false && \"$(field "$json" selectedPage)\" == 0 ]]" "daemon unavailability keeps the panel on Overview"
-check "[[ \"$(field "$json" locationsAvailable)\" == false && \"$(field "$json" barTooltip)\" == *daemon*unavailable* ]]" "daemon-dependent pages and tunnel UI remain unavailable"
+check_json "$json" "daemon unavailability keeps the panel on Overview" cliReady eq false selectedPage eq 0
+check_json "$json" "daemon-dependent pages and tunnel UI remain unavailable" locationsAvailable eq false barTooltip contains daemon barTooltip contains unavailable
 
 json="$(run_case availability-ready)"
-check "[[ \"$(field "$json" cliReady)\" == true && \"$(field "$json" advancedAvailable)\" == true ]]" "pages unlock when CLI and daemon are ready"
-check "[[ \"$(field "$json" selectedPage)\" == 2 ]]" "ready panel can navigate to Advanced"
+check_json "$json" "pages unlock when CLI and daemon are ready" cliReady eq true advancedAvailable eq true
+check_json "$json" "ready panel can navigate to Advanced" selectedPage eq 2
 
 json="$(run_case excluded-groups)"
-check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" selectedPage)\" == 3 ]]" "Excluded page opens without engine errors"
-check "[[ \"$(field "$json" processCount)\" == 14 && \"$(field "$json" groupCount)\" == 1 ]]" "fourteen excluded processes render as one app group"
-check "[[ \"$(field "$json" firstLabel)\" == [Cc]hromium && \"$(field "$json" firstCount)\" == 14 ]]" "group exposes the root process label and member count"
-check "[[ \"$(field "$json" pageLoaded)\" == true && \"$(field "$json" pageGroupCount)\" == 1 ]]" "Excluded page receives the grouped model"
+check_json "$json" "Excluded page opens without engine errors" note empty ignored selectedPage eq 3
+check_json "$json" "fourteen excluded processes render as one app group" processCount eq 14 groupCount eq 1
+check_json "$json" "group exposes the root process label and member count" firstLabel ieq chromium firstCount eq 14
+check_json "$json" "Excluded page receives the grouped model" pageLoaded eq true pageGroupCount eq 1
 
 json="$(run_case local-app-catalogue)"
-check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" selectedPage)\" == 3 ]]" "local application catalogue scenario loads the Excluded page"
-check "[[ \"$(field "$json" appLibraryNull)\" == true && \"$(field "$json" ownService)\" == true && \"$(field "$json" foreignServiceNull)\" == true ]]" "probe matches the scoped Omarchy 4.0.3 facade"
-check "[[ \"$(field "$json" excludedMetadataCount)\" -ge 1 ]]" "excluded-process labels use local desktop metadata"
-check "[[ \"$(field "$json" emptyText)\" == 'No installed applications match your search.' ]]" "local catalogue does not require the host app library"
+check_json "$json" "local application catalogue scenario loads the Excluded page" note empty ignored selectedPage eq 3
+check_json "$json" "probe matches the scoped Omarchy 4.0.3 facade" appLibraryNull eq true ownService eq true foreignServiceNull eq true
+check_json "$json" "excluded-process labels use local desktop metadata" excludedMetadataCount ge 1
+check_json "$json" "local catalogue does not require the host app library" emptyText eq 'No installed applications match your search.'
 
 json="$(run_case recent-apps)"
-check "[[ -n '$json' && -z \"$(field "$json" note)\" && \"$(field "$json" recentCount)\" -ge 1 ]]" "empty query resolves recent desktop IDs"
-check "[[ \"$(field "$json" searchCount)\" -ge 1 ]]" "non-empty query searches the complete local catalogue"
-check "[[ -z \"$(field "$json" queryAfterLaunch)\" && \"$(field "$json" updateId)\" == io.github.kallupx.oma-mullvad ]]" "launch recording clears search and updates only the plugin settings"
-check "[[ \"$(field "$json" savedRecentFirst)\" == \"$(field "$json" recentFirst)\" && \"$(field "$json" refreshIntervalSec)\" == 30 ]]" "recent launch persistence preserves unrelated settings"
-check "[[ -z \"$(field "$json" queryAfterLeave)\" ]]" "leaving the Excluded tab clears stale search"
+check_json "$json" "empty query resolves recent desktop IDs" note empty ignored recentCount ge 1
+check_json "$json" "non-empty query searches the complete local catalogue" searchCount ge 1
+check_json "$json" "launch recording clears search and updates only the plugin settings" queryAfterLaunch empty ignored updateId eq io.github.kallupx.oma-mullvad
+recent_first="$(node -e 'process.stdout.write(String(JSON.parse(process.argv[1]).recentFirst || ""))' "$json")"
+check_json "$json" "recent launch persistence preserves unrelated settings" savedRecentFirst eq "$recent_first" refreshIntervalSec eq 30
+check_json "$json" "leaving the Excluded tab clears stale search" queryAfterLeave empty ignored
 
 json="$(run_case launch-result)"
-check "[[ \"$(field "$json" rejected)\" == true && \"$(field "$json" failurePreserved)\" == true ]]" "failed excluded launch keeps panel and recent state unchanged"
-check "[[ \"$(field "$json" accepted)\" == true && \"$(field "$json" closedAfterSuccess)\" == true && \"$(field "$json" queryClearedAfterSuccess)\" == true ]]" "successful excluded launch records, clears, and closes"
-check "[[ \"$(field "$json" savedRecentFirst)\" == 'Zoom (Web).desktop' ]]" "successful spaced desktop ID is recorded"
+check_json "$json" "failed excluded launch keeps panel and recent state unchanged" rejected eq true failurePreserved eq true
+check_json "$json" "successful excluded launch records, clears, and closes" accepted eq true closedAfterSuccess eq true queryClearedAfterSuccess eq true
+check_json "$json" "successful spaced desktop ID is recorded" savedRecentFirst eq 'Zoom (Web).desktop'
 
 exit "$((failures > 0))"

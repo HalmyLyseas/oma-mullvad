@@ -12,12 +12,26 @@ if ! command -v qs >/dev/null 2>&1; then
   exit 0
 fi
 
-field() {
-  node -e 'const v=JSON.parse(process.argv[1])[process.argv[2]]; process.stdout.write(v == null ? "" : String(v))' "$1" "$2"
+check_json() {
+  local json="$1" label="$2"
+  shift 2
+  if node "$probe_dir/json-assert.mjs" "$json" "$@"; then
+    printf 'ok - %s\n' "$label"
+  else
+    printf 'not ok - %s\n' "$label"
+    failures=$((failures + 1))
+  fi
 }
 
-check() {
-  if eval "$1"; then printf 'ok - %s\n' "$2"; else printf 'not ok - %s\n' "$2"; failures=$((failures + 1)); fi
+check_command() {
+  local label="$1"
+  shift
+  if "$@"; then
+    printf 'ok - %s\n' "$label"
+  else
+    printf 'not ok - %s\n' "$label"
+    failures=$((failures + 1))
+  fi
 }
 
 run_case() {
@@ -40,7 +54,7 @@ run_case() {
 }
 
 check_orphans() {
-  local name="$1" leaked=0
+  local name="$1" leaked=0 state
   while read -r pid; do
     [[ -z "$pid" ]] && continue
     if kill -0 "$pid" 2>/dev/null; then
@@ -48,60 +62,64 @@ check_orphans() {
       if [[ "$state" != Z ]]; then leaked=1; kill -9 "$pid" 2>/dev/null || true; fi
     fi
   done < <(sed -n 's/^PID=\([0-9]*\).*/\1/p' "$scratch/$name.mock" | sort -u)
-  check "[[ $leaked -eq 0 ]]" "$name leaves no live mock process"
+  if [[ "$leaked" -eq 0 ]]; then
+    printf 'ok - %s\n' "$name leaves no live mock process"
+  else
+    printf 'not ok - %s\n' "$name leaves no live mock process"
+    failures=$((failures + 1))
+  fi
 }
 
 json="$(run_case ok ok login)"
-check "[[ -n '$json' ]]" "ok probe completes"
-check "[[ \"$(field "$json" installed)\" == true && \"$(field "$json" daemonRunning)\" == true ]]" "reads populate service state"
-check "[[ \"$(field "$json" cliVersion)\" == 2026.4 && \"$(field "$json" cliVersionSupported)\" == true ]]" "direct probe preserves CLI-version support state"
-check "[[ \"$(field "$json" locations)\" -gt 0 ]]" "relay data parses"
-check "[[ \"$(field "$json" excludedProcessesLength)\" -eq 14 ]]" "excluded process details resolve"
-check "[[ \"$(field "$json" excludedGroupCount)\" -eq 1 ]]" "one app launch folds into one group"
-check "grep -q 'login-received-len=16' '$scratch/ok.mock'" "login stdin reaches direct child"
+check_json "$json" "ok probe completes" note empty ignored
+check_json "$json" "reads populate service state" installed eq true daemonRunning eq true
+check_json "$json" "direct probe preserves CLI-version support state" cliVersion eq 2026.4 cliVersionSupported eq true
+check_json "$json" "relay data parses" locations gt 0
+check_json "$json" "excluded process details resolve" excludedProcessesLength eq 14
+check_json "$json" "one app launch folds into one group" excludedGroupCount eq 1
+check_command "login stdin reaches direct child" grep -q 'login-received-len=16' "$scratch/ok.mock"
 check_orphans ok
 
 json="$(run_case hang hang none)"
-check "[[ \"$(field "$json" readWatchdogs)\" -eq 1 ]]" "read watchdog fires once"
-check "[[ \"$(field "$json" lastError)\" == *timed\ out* ]]" "read timeout is surfaced"
+check_json "$json" "read watchdog fires once" readWatchdogs eq 1
+check_json "$json" "read timeout is surfaced" lastError contains 'timed out'
 check_orphans hang
 
 json="$(run_case flood flood none)"
-check "[[ \"$(field "$json" readOverflows)\" -eq 1 ]]" "streaming output limit fires once"
-check "[[ \"$(field "$json" readChars)\" -le 262144 ]]" "retained output stays bounded"
+check_json "$json" "streaming output limit fires once" readOverflows eq 1
+check_json "$json" "retained output stays bounded" readChars le 262144
 check_orphans flood
 
 json="$(run_case listener-flood listener-flood listener-flood)"
-check "[[ \"$(field "$json" listenerOverflows)\" -ge 1 ]]" "listener rejects an unterminated over-limit line"
-check "[[ \"$(field "$json" lastError)\" == *output\ limit\ exceeded* ]]" "listener overflow is surfaced"
+check_json "$json" "listener rejects an unterminated over-limit line" listenerOverflows ge 1
+check_json "$json" "listener overflow is surfaced" lastError contains 'output limit exceeded'
 check_orphans listener-flood
 
 json="$(run_case action action-hang action-hang)"
-check "[[ \"$(field "$json" actionWatchdogs)\" -eq 1 ]]" "action watchdog fires once"
-check "[[ \"$(field "$json" lastError)\" == *timed\ out* ]]" "action timeout is surfaced"
+check_json "$json" "action watchdog fires once" actionWatchdogs eq 1
+check_json "$json" "action timeout is surfaced" lastError contains 'timed out'
 check_orphans action
 
 json="$(run_case fail fail none)"
-check "[[ -n '$json' && -z \"$(field "$json" note)\" ]]" "read queue drains after command failures"
+check_json "$json" "read queue drains after command failures" note empty ignored
 check_orphans fail
 
 json="$(run_case removed removed removed)"
-check "[[ \"$(field "$json" installed)\" == false && -z \"$(field "$json" note)\" ]]" "missing binary finalizes without wedging the queue"
-check "[[ \"$(field "$json" lastError)\" == *not\ found* ]]" "failed start is surfaced"
+check_json "$json" "missing binary finalizes without wedging the queue" installed eq false note empty ignored
+check_json "$json" "failed start is surfaced" lastError contains 'not found'
 check_orphans removed
 
 json="$(run_case sequence ok state-sequence)"
-trace="$(field "$json" stateTrace)"
-check "[[ \"$trace\" == *connecting* && \"$trace\" == *connected* && \"$trace\" == *error* && \"$trace\" == *disconnected* ]]" "listener sequence exposes every protection-state transition"
-check "[[ \"$(field "$json" finalState)\" == disconnected && \"$(field "$json" finalConnected)\" == false ]]" "listener sequence settles truthfully disconnected"
+check_json "$json" "listener sequence exposes every protection-state transition" stateTrace contains connecting stateTrace contains connected stateTrace contains error stateTrace contains disconnected
+check_json "$json" "listener sequence settles truthfully disconnected" finalState eq disconnected finalConnected eq false
 check_orphans sequence
 
 json="$(run_case race ok status-race)"
-check "[[ \"$(field "$json" finalState)\" == connected && \"$(field "$json" finalConnected)\" == true ]]" "stale delayed poll cannot overwrite a newer listener event"
+check_json "$json" "stale delayed poll cannot overwrite a newer listener event" finalState eq connected finalConnected eq true
 check_orphans race
 
 json="$(run_case launch ok launch-result)"
-check "[[ \"$(field "$json" launchRejected)\" == true && \"$(field "$json" launchAccepted)\" == true ]]" "excluded launch reports rejection and dispatch success"
+check_json "$json" "excluded launch reports rejection and dispatch success" launchRejected eq true launchAccepted eq true
 check_orphans launch
 
 exit "$((failures > 0))"
