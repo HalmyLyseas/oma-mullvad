@@ -89,6 +89,13 @@ ShellRoot {
           root.service._applyRead("packageInfo", "mullvad-vpn\t2026.4-1\tMullvad VPN\t2026-09-01 12:00", "", 0)
           root.elapsed = 0
           updateDrain.start()
+        } else if (root.scenario === "status-failure-clears-daemon") {
+          root.service.daemonVersion = "stale"
+          root.service.daemonSupported = true
+          root.service.suggestedUpgrade = "stale"
+          root.service._pendingStatusSeq = root.service._statusApplySeq
+          root.service._applyRead("status", "", "daemon unavailable", 1)
+          root.finish("")
         } else root.finish("")
       } else if (root.elapsed > 10000) root.finish("read queue did not drain")
     }

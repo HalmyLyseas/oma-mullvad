@@ -354,6 +354,9 @@ Item {
       if (exitCode !== 0) {
         if (root._pendingStatusSeq < root._statusApplySeq) return
         daemonRunning = false
+        daemonVersion = ""
+        daemonSupported = null
+        suggestedUpgrade = ""
         connected = false
         state = "unavailable"
         statusText = "Mullvad daemon unavailable"

@@ -151,4 +151,8 @@ json="$(run_case automatic-update-refresh ok automatic-update-refresh)"
 check_json "$json" "automatic check waits for fresh package metadata" updateCheckStatus eq ok updateResultCount eq 1
 check_orphans automatic-update-refresh
 
+json="$(run_case status-failure-clears-daemon ok status-failure-clears-daemon)"
+check_json "$json" "status failure clears stale daemon diagnostics" daemonVersion empty ignored daemonRunning eq false
+check_orphans status-failure-clears-daemon
+
 exit "$((failures > 0))"
