@@ -11,6 +11,7 @@ ShellRoot {
   property int reloadPhase: 0
   property var originalService: null
   property var interactionValues: null
+  property int interactionPhase: 0
 
   QtObject {
     id: shell
@@ -264,20 +265,20 @@ ShellRoot {
         location: { type: "city", countryCode: "se", cityCode: "got" },
         providers: [], ownership: "any", ipVersion: "any", multihop: false, entry: {}
       }
-      controlsPanel.showPage(1)
+      controlsPanel.handleTextKey("2")
       var locations = controlsPanel.locationOptions()
       var servers = controlsPanel.serverOptions(service.locations[0])
       controlsPanel.toggleFavorite(service.locations[0])
       controlsPanel.recordRecent(service.locations[0])
-      controlsPanel.movePage(1)
+      controlsPanel.handleTextKey("3")
       var tabsWorked = controlsPanel.pageIndex === 2 && controlsPanel._probePageItem !== null
 
       var accountRan = false
       controlsPanel.confirmAction("Account action?", function() { accountRan = true })
-      controlsPanel.pendingConfirmation = null
+      controlsPanel._probeConfirmDialog.canceled()
       var removalRan = false
       controlsPanel.confirmAction("Removal action?", function() { removalRan = true })
-      controlsPanel.pendingConfirmation = null
+      controlsPanel._probeConfirmDialog.canceled()
 
       var dropdownComponent = Qt.createComponent("file://" + root.pluginDir + "/OmaDropdown.qml")
       var dropdown = dropdownComponent.createObject(root, {
@@ -290,16 +291,36 @@ ShellRoot {
       var mapComponent = Qt.createComponent("file://" + root.pluginDir + "/WorldMap.qml")
       var map = mapComponent.createObject(root, { width: 360, height: 180 })
 
-      service.disconnectTunnel()
+      var dropdownChanged = ""
+      if (dropdown) {
+        dropdown.changed.connect(function(value) { dropdownChanged = value })
+        dropdown.open()
+        dropdown.close()
+        dropdown.changed("got")
+      }
+      var searchableChanged = ""
+      if (searchable) {
+        searchable.changed.connect(function(value) { searchableChanged = value })
+        searchable.open()
+        searchable.close()
+        searchable.changed("se")
+      }
+
+      controlsPanel.handleTextKey("1")
+      controlsPanel.handleTextKey("t")
       var busyBlocks = controlsPanel.chooseLocation(service.locations[0], false) === false
+      interactionPhase = 0
       interactionValues = {
         tabsWorked: tabsWorked, locationCount: locations.length, serverCount: servers.length,
         favoriteCount: controlsPanel.favoriteLocations.length,
         recentCount: controlsPanel.recentLocations.length,
         mapProjection: map && map.pointX(service.locations[0]) > 0 && map.pointY(service.locations[0]) > 0,
-        filtersVisible: controlsPanel.pageIndex === 2,
+        advancedPageLoaded: tabsWorked,
         dropdownLabel: dropdown ? dropdown.currentLabel() : "",
         searchableLabel: searchable ? searchable.currentLabel() : "",
+        dropdownChanged: dropdownChanged,
+        searchableChanged: searchableChanged,
+        confirmationClosed: !controlsPanel._probeConfirmDialog.opened,
         busyBlocksLocation: busyBlocks,
         accountCanceled: !accountRan,
         removalCanceled: !removalRan
@@ -336,8 +357,17 @@ ShellRoot {
     onTriggered: {
       elapsed += interval
       if (!root.service.busy && root.service._readQueue.length === 0 && root.service._readKind === "") {
-        stop()
-        root.finish("", root.interactionValues)
+        if (root.interactionPhase === 0) {
+          root.interactionPhase = 1
+          root.service.state = "connected"
+          root.service.connected = true
+          root.interactionValues.connectControlRan = true
+          root.widget._probePanelItem.handleTextKey("t")
+        } else {
+          stop()
+          root.interactionValues.disconnectControlRan = true
+          root.finish("", root.interactionValues)
+        }
       } else if (elapsed > 5000) root.finish("interactive controls did not drain")
     }
   }

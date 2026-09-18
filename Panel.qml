@@ -31,6 +31,8 @@ Panel {
   property bool syncingSettings: false
   readonly property bool cliReady: service.installed && service.daemonRunning
   readonly property var _probePageItem: pageLoader.item
+  readonly property var _probeConfirmDialog: confirmDialog
+  property var _probeFirstLocationRow: null
   readonly property string appEmptyText: "No installed applications match your search."
 
   Connections {
@@ -342,6 +344,18 @@ Panel {
     }
   }
 
+  function handleTextKey(text) {
+    if (text === "1") showPage(0)
+    else if (text === "2") showPage(1)
+    else if (text === "3") showPage(2)
+    else if (text === "4") showPage(3)
+    else if (text === "5") showPage(4)
+    else if (text === "r" || text === "R") service.refreshAll()
+    else if ((text === "t" || text === "T") && cliReady) service.toggleTunnel()
+    else if ((text === "n" || text === "N") && cliReady) cycleFavorite(1)
+    else if ((text === "p" || text === "P") && cliReady) cycleFavorite(-1)
+  }
+
   onCliReadyChanged: if (!pageAvailable(pageIndex)) showPage(0)
 
   function moveScroll(delta) {
@@ -459,17 +473,7 @@ Panel {
       onActivateRequested: if (root.cliReady) service.toggleTunnel()
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.focusNext(direction) }
-      onTextKey: function(text) {
-        if (text === "1") root.showPage(0)
-        else if (text === "2") root.showPage(1)
-        else if (text === "3") root.showPage(2)
-        else if (text === "4") root.showPage(3)
-        else if (text === "5") root.showPage(4)
-        else if (text === "r" || text === "R") service.refreshAll()
-        else if ((text === "t" || text === "T") && root.cliReady) service.toggleTunnel()
-        else if ((text === "n" || text === "N") && root.cliReady) root.cycleFavorite(1)
-        else if ((text === "p" || text === "P") && root.cliReady) root.cycleFavorite(-1)
-      }
+      onTextKey: function(text) { root.handleTextKey(text) }
 
       Column {
         id: panelColumn
