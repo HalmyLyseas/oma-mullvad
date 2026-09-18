@@ -39,8 +39,10 @@ System package metadata uses the normal bounded read queue and is collected even
 Run the complete local gate from the repository root:
 
 ```bash
-bash test/ci-local --no-cage
+bash test/ci-local
 ```
+
+Use `bash test/ci-local --no-cage` only as a live-session fallback when Cage cannot be used.
 
 The gate runs:
 
@@ -49,7 +51,8 @@ The gate runs:
 3. `node test/cli-contract.mjs`, which invokes only read-only Mullvad commands and skips only when the CLI is absent.
 4. `test/probe/run` for mocked process, timeout, output-limit, listener, race, grouping, package metadata, and isolated read-only update-check behavior.
 5. `test/probe/run-ui` against the real `BarWidget.qml` and `Panel.qml`, including System availability without the CLI or daemon, under the selected Omarchy shell source.
-6. Node tests, QML lint, and manifest validation again from a clean archive of the proposed index.
+6. `test/probe/run-settings` against the current scoped host facade and an isolated `shell.json`.
+7. Node tests, runner/mock syntax, QML lint, and manifest validation again from a clean archive of the proposed index.
 
 The probe suites mock all VPN-changing commands, `checkupdates`, process lookup, and excluded-application launch; they must not mutate the live daemon or invoke a real package manager or network update check. CI clones exact Omarchy `v4.0.3` and `v4.0.4` tags and runs the gate once against each tag's `shell/` and `bin/omarchy-plugin-validate`. Local validation defaults to `/usr/share/omarchy/shell` and the installed `omarchy-plugin-validate`; set `OMARCHY_SHELL_DIR` and `OMARCHY_PLUGIN_VALIDATOR` to test other source trees.
 

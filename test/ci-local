@@ -35,9 +35,16 @@ lint_tree() {
 }
 
 clean_archive() {
-  local tree
+  local tree file
   tree="$(git -C "$root" write-tree)" || return 1
   git -C "$root" archive "$tree" | tar -x -C "$archive_dir" || return 1
+  while IFS= read -r file; do
+    [[ -f "$archive_dir/$file" ]] || { echo "clean archive missing $file" >&2; return 1; }
+    bash -n "$archive_dir/$file" || return 1
+  done < <(git -C "$root" ls-files 'test/probe/run*' 'test/probe/collect-result' 'test/mocks/*' 'test/all' 'test/ci-local')
+  [[ -x "$archive_dir/test/all" ]] || { echo "clean archive test/all is not executable" >&2; return 1; }
+  node --check "$archive_dir/test/probe/collect-result.mjs" || return 1
+  node --check "$archive_dir/test/cli-contract.mjs" || return 1
   node --test "$archive_dir/tests"/*.test.js || return 1
   lint_tree "$archive_dir" || return 1
   "$omarchy_plugin_validator" "$archive_dir" || return 1

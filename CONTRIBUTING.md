@@ -13,8 +13,10 @@
 Use tests first for behavior changes: add a focused failing test, confirm the expected failure, implement the minimum change, then run the relevant suite. Before committing, run:
 
 ```bash
-bash test/ci-local --no-cage
+bash test/ci-local
 ```
+
+Use `bash test/ci-local --no-cage` only as a live-session fallback when Cage cannot be used.
 
 QML service changes require `omarchy restart shell` when testing an installed copy; plugin hot reload does not replace a `keepLoaded` service reliably. Installed testing is separate from source-tree validation and must be explicitly requested.
 
