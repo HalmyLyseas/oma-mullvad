@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -uo pipefail
+[[ "$*" == "-x mullvad-daemon" ]] || { echo "pgrep mock: unhandled invocation: $*" >&2; exit 2; }
+printf '4242\n'

@@ -44,10 +44,13 @@ run_case() {
   ln -s "$plugin_dir/test/mocks/mullvad" "$path_dir/mullvad"
   ln -s "$plugin_dir/test/mocks/mullvad-exclude" "$path_dir/mullvad-exclude"
   ln -s "$plugin_dir/test/mocks/ps" "$path_dir/ps"
+  ln -s "$plugin_dir/test/mocks/pgrep" "$path_dir/pgrep"
+  ln -s "$plugin_dir/test/mocks/checkupdates" "$path_dir/checkupdates"
   : > "$scratch/$name.mock"
   MULLVAD_MOCK_MODE="$mode" MULLVAD_MOCK_LOG="$scratch/$name.mock" \
     MULLVAD_MOCK_LISTEN_SCRIPT="$listen_script" \
     MULLVAD_MOCK_STATUS_DELAY_TRIGGER="$scratch/$name.delay" \
+    MULLVAD_PACMAN_LOCAL_DB="$plugin_dir/test/fixtures/pacman-local" \
     MULLVAD_PROBE_SCENARIO="$scenario" MULLVAD_PLUGIN_DIR="$plugin_dir" \
     PATH="$path_dir:$PATH" timeout 20 qs -n -p "$probe_dir/service-probe.qml" \
     > "$scratch/$name.log" 2>&1
@@ -123,5 +126,29 @@ json="$(run_case launch ok launch-result)"
 check_json "$json" "excluded launch reports rejection and dispatch success" launchRejected eq true launchAccepted eq true
 check_command "excluded launch stays inside the mock boundary" grep -Fq 'mullvad-exclude <uwsm-app> <--> <gtk-launch> <Zoom (Web).desktop>' "$scratch/launch.mock"
 check_orphans launch
+
+json="$(run_case system ok system)"
+check_json "$json" "System diagnostics include daemon and package metadata" daemonVersion eq 2026.4 daemonSupported eq true daemonPid eq 4242 packageCount eq 1
+check_json "$json" "read-only update check records result and timestamp" updateCheckStatus eq ok updateResultCount eq 1 updateCheckedAt gt 0
+check_json "$json" "update check remains outside the service busy queue" busyDuringUpdateCheck eq false
+check_command "System update check invokes only the read-only helper" grep -Fq 'checkupdates <>' "$scratch/system.mock"
+check_orphans system
+
+json="$(run_case update-hang update-hang system)"
+check_json "$json" "update watchdog terminates a hung read-only check" updateCheckStatus eq unavailable updateCheckWatchdogs eq 1
+check_json "$json" "hung update check never enters the service busy queue" busyDuringUpdateCheck eq false
+check_orphans update-hang
+
+json="$(run_case update-stubborn update-stubborn system)"
+check_json "$json" "update watchdog escalates against a TERM-resistant check" updateCheckStatus eq unavailable updateCheckWatchdogs eq 1
+check_orphans update-stubborn
+
+json="$(run_case stale-diagnostics ok stale-diagnostics)"
+check_json "$json" "failed diagnostic reads clear stale daemon and package data" daemonVersion empty ignored packageCount eq 0
+check_orphans stale-diagnostics
+
+json="$(run_case automatic-update-refresh ok automatic-update-refresh)"
+check_json "$json" "automatic check waits for fresh package metadata" updateCheckStatus eq ok updateResultCount eq 1
+check_orphans automatic-update-refresh
 
 exit "$((failures > 0))"

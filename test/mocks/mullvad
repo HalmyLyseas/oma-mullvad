@@ -38,6 +38,7 @@ fi
 
 case "$*" in
   --version) cat "$fixtures/version.txt" ;;
+  version) printf 'Current version: 2026.4\nIs supported: true\nSuggested upgrade: none\n' ;;
   "status --json")
     if [[ -n "${MULLVAD_MOCK_STATUS_DELAY_TRIGGER:-}" && -e "$MULLVAD_MOCK_STATUS_DELAY_TRIGGER" ]]; then
       rm -f "$MULLVAD_MOCK_STATUS_DELAY_TRIGGER"

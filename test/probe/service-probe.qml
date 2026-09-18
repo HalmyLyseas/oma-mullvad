@@ -10,6 +10,7 @@ ShellRoot {
   property bool removedRefreshStarted: false
   property bool launchRejected: false
   property bool launchAccepted: false
+  property bool busyDuringUpdateCheck: false
   property string scenario: Quickshell.env("MULLVAD_PROBE_SCENARIO")
   property var observedStates: []
   property string lastObservedState: ""
@@ -21,6 +22,7 @@ ShellRoot {
       root.service = item
       item.readTimeoutMs = 800
       item.actionTimeoutMs = 800
+      item.updateCheckTimeoutMs = 800
       stateSampler.start()
       settle.start()
     }
@@ -66,6 +68,27 @@ ShellRoot {
           root.launchRejected = root.service.launchExcludedApp("../bad.desktop") === false
           root.launchAccepted = root.service.launchExcludedApp("Zoom (Web).desktop") === true
           root.finish("")
+        } else if (root.scenario === "system") {
+          root.service.checkForUpdates()
+          root.busyDuringUpdateCheck = root.service.busy
+          root.elapsed = 0
+          updateDrain.start()
+        } else if (root.scenario === "stale-diagnostics") {
+          root.service.daemonVersion = "stale"
+          root.service.daemonSupported = true
+          root.service.suggestedUpgrade = "stale"
+          root.service.packages = [{ name: "mullvad-vpn", version: "stale" }]
+          root.service._applyRead("daemonVersion", "", "failed", 1)
+          root.service._applyRead("packageInfo", "", "failed", 1)
+          root.finish("")
+        } else if (root.scenario === "automatic-update-refresh") {
+          root.service.updateCheckStatus = "never"
+          root.service.updateCheckedAt = 0
+          root.service._updateCheckAttemptedAt = 0
+          root.service._autoUpdateCheckPending = true
+          root.service._applyRead("packageInfo", "mullvad-vpn\t2026.4-1\tMullvad VPN\t2026-09-01 12:00", "", 0)
+          root.elapsed = 0
+          updateDrain.start()
         } else root.finish("")
       } else if (root.elapsed > 10000) root.finish("read queue did not drain")
     }
@@ -118,6 +141,19 @@ ShellRoot {
   }
 
   Timer {
+    id: updateDrain
+    interval: 50
+    repeat: true
+    onTriggered: {
+      root.elapsed += interval
+      if (root.service.updateCheckStatus !== "checking") {
+        stop()
+        root.finish("")
+      } else if (root.elapsed > 5000) root.finish("update check did not finish")
+    }
+  }
+
+  Timer {
     id: actionDrain
     interval: 50
     repeat: true
@@ -156,6 +192,16 @@ ShellRoot {
       removedRefreshStarted: root.removedRefreshStarted,
       launchRejected: root.launchRejected,
       launchAccepted: root.launchAccepted,
+      daemonVersion: service.daemonVersion,
+      daemonSupported: service.daemonSupported,
+      daemonPid: service.daemonPid,
+      packageCount: service.packages.length,
+      updateCheckStatus: service.updateCheckStatus,
+      updateCheckedAt: service.updateCheckedAt,
+      updateResultCount: service.updateResults.length,
+      updateCheckWatchdogs: service._updateCheckWatchdogFiredCount,
+      updateCheckOverflows: service._updateCheckOverflowCount,
+      busyDuringUpdateCheck: root.busyDuringUpdateCheck,
       note: note
     }))
     Qt.quit()

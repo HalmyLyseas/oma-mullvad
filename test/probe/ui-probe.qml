@@ -161,13 +161,18 @@ ShellRoot {
       service.installed = scenario !== "availability-cli"
       service.daemonRunning = scenario === "availability-ready"
       panel.showPage(2)
+      var dependentSelectedPage = panel.pageIndex
+      panel.showPage(4)
       finish("", {
         cliReady: panel.cliReady,
         overviewAvailable: panel.pageAvailable(0),
         locationsAvailable: panel.pageAvailable(1),
         advancedAvailable: panel.pageAvailable(2),
         excludedAvailable: panel.pageAvailable(3),
-        selectedPage: panel.pageIndex,
+        systemAvailable: panel.pageAvailable(4),
+        selectedPage: dependentSelectedPage,
+        systemSelectedPage: panel.pageIndex,
+        systemPageLoaded: panel._probePageItem !== null,
         barTooltip: widget.barTooltip
       })
     } else if (scenario === "local-app-catalogue") {
@@ -227,16 +232,10 @@ ShellRoot {
       var rejected = launchPanel.launchExcludedApp("../bad.desktop") === false
       var failurePreserved = launchPanel.opened && launchPanel.appQuery === "keep"
         && shell.lastUpdateId === ""
-      var accepted = launchPanel.launchExcludedApp("Zoom (Web).desktop") === true
-      finish("", {
-        rejected: rejected,
-        failurePreserved: failurePreserved,
-        accepted: accepted,
-        closedAfterSuccess: !launchPanel.opened,
-        queryClearedAfterSuccess: launchPanel.appQuery === "",
-        savedRecentFirst: shell.lastUpdatePayload && shell.lastUpdatePayload.recentExcludedApps
-          ? String(shell.lastUpdatePayload.recentExcludedApps[0]) : ""
-      })
+      launchResultWait.panel = launchPanel
+      launchResultWait.rejected = rejected
+      launchResultWait.failurePreserved = failurePreserved
+      launchResultWait.start()
     } else if (scenario === "excluded-groups") {
       var excludedPanel = widget._probePanelItem
       service.installed = true
@@ -255,6 +254,32 @@ ShellRoot {
         })
       })
     } else finish("unknown scenario")
+  }
+
+  Timer {
+    id: launchResultWait
+    property var panel: null
+    property bool rejected: false
+    property bool failurePreserved: false
+    property int elapsed: 0
+    interval: 50
+    repeat: true
+    onTriggered: {
+      elapsed += interval
+      if (!root.service.busy && root.service._readQueue.length === 0 && root.service._readKind === "") {
+        stop()
+        var accepted = panel.launchExcludedApp("Zoom (Web).desktop") === true
+        root.finish("", {
+          rejected: rejected,
+          failurePreserved: failurePreserved,
+          accepted: accepted,
+          closedAfterSuccess: !panel.opened,
+          queryClearedAfterSuccess: panel.appQuery === "",
+          savedRecentFirst: shell.lastUpdatePayload && shell.lastUpdatePayload.recentExcludedApps
+            ? String(shell.lastUpdatePayload.recentExcludedApps[0]) : ""
+        })
+      } else if (elapsed > 5000) root.finish("launch refresh did not drain")
+    }
   }
 
   Timer {
