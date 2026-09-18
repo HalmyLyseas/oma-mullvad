@@ -266,6 +266,35 @@ test("desktop entries search locally with bounds and no-display filtering", () =
     })), "app", 30).length, 30);
 });
 
+test("desktop catalogue search bounds entries and every concatenated field", () => {
+    const beyondScanLimit = Array.from({ length: 4097 }, (_, i) => ({
+        id: `app-${i}.desktop`, name: i === 4096 ? "Needle" : "Ordinary"
+    }));
+    assert.equal(Model.searchDesktopEntries(beyondScanLimit, "needle", 30).length, 0);
+
+    const afterBound = "x".repeat(600) + "needle";
+    for (const field of ["id", "name", "genericName", "comment"]) {
+        const entry = { id: "bounded.desktop", name: "Bounded" };
+        entry[field] = afterBound;
+        assert.equal(Model.searchDesktopEntries([entry], "needle", 30).length, 0, field);
+    }
+    assert.equal(Model.searchDesktopEntries([{
+        id: "bounded.desktop", name: "Bounded", keywords: [afterBound]
+    }], "needle", 30).length, 0, "keyword length");
+
+    const keywords = Array.from({ length: 65 }, (_, i) => i === 64 ? "needle" : "ordinary");
+    assert.equal(Model.searchDesktopEntries([{
+        id: "keyword-cap.desktop", name: "Keyword Cap", keywords
+    }], "needle", 30).length, 0);
+});
+
+test("desktop exec basename is bounded before tokenization", () => {
+    assert.equal(Model.desktopEntryExecBase({ execString: "/usr/bin/firefox --private" }), "firefox");
+    const oversized = Model.desktopEntryExecBase({ execString: "x".repeat(5000) + " /bin/needle" });
+    assert.equal(oversized.length, 256);
+    assert.equal(oversized.includes("needle"), false);
+});
+
 test("recent excluded apps normalize, deduplicate, and cap at ten", () => {
     assert.deepEqual(Model.normalizeRecentApps([
         "org.mozilla.firefox.desktop", "bad id;rm", "org.mozilla.firefox.desktop",

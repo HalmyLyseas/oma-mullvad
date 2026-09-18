@@ -13,6 +13,8 @@ var MAX_SERVERS = 2048;
 var MAX_SERVERS_PER_LOCATION = 128;
 var MAX_PROVIDERS = 128;
 var MAX_EXCLUDED_PIDS = 256;
+var MAX_DESKTOP_ENTRIES = 4096;
+var MAX_DESKTOP_KEYWORDS = 64;
 var SUPPORTED_CLI_SERIES = ["2026.4"];
 
 function text(value) {
@@ -895,11 +897,24 @@ function desktopEntrySubtext(entry) {
 }
 
 function desktopEntryKeywords(entry) {
+    var result = [];
     try {
-        if (entry && entry.keywords && typeof entry.keywords.join === "function")
-            return entry.keywords.join(" ");
+        var keywords = entry && entry.keywords;
+        var length = keywords && typeof keywords.length === "number"
+            ? Math.min(keywords.length, MAX_DESKTOP_KEYWORDS) : 0;
+        for (var i = 0; i < length; ++i) {
+            var keyword = plainText(keywords[i], 128);
+            if (keyword) result.push(keyword);
+        }
     } catch (_) {}
-    return "";
+    return result.join(" ");
+}
+
+function desktopEntryExecBase(entry) {
+    var execString = plainText(entry && entry.execString, 1024);
+    var firstWord = execString.split(/\s+/)[0] || "";
+    var parts = firstWord.split("/");
+    return plainText(parts[parts.length - 1], 256);
 }
 
 function desktopEntryWords(value) {
@@ -915,11 +930,12 @@ function desktopEntryScore(entry, query) {
     var needle = plainText(query, 128).toLowerCase();
     if (!needle) return 0;
     var name = desktopEntryName(entry).toLowerCase();
+    var genericName = desktopEntrySubtext(entry);
+    var comment = plainText(entry && entry.comment, 512);
+    var keywords = desktopEntryKeywords(entry);
     var id = plainText(entry && entry.id, 256).toLowerCase();
-    var haystack = [name, desktopEntrySubtext(entry), entry && entry.comment,
-        desktopEntryKeywords(entry), id].join(" ").toLowerCase();
-    var acronym = desktopEntryWords([name, desktopEntrySubtext(entry),
-        desktopEntryKeywords(entry), id].join(" ")).map(function(word) {
+    var haystack = [name, genericName, comment, keywords, id].join(" ").toLowerCase();
+    var acronym = desktopEntryWords([name, genericName, keywords, id].join(" ")).map(function(word) {
             return word.charAt(0);
         }).join("");
     var acronymIndex = needle.length <= 5 ? acronym.indexOf(needle) : -1;
@@ -943,7 +959,7 @@ function searchDesktopEntries(values, query, maxRows) {
     values = values && typeof values.length === "number" ? values : [];
     var limit = Math.max(1, Math.min(Number(maxRows) || 30, 100));
     var rows = [];
-    for (var i = 0; i < values.length; ++i) {
+    for (var i = 0; i < values.length && i < MAX_DESKTOP_ENTRIES; ++i) {
         var entry = values[i];
         if (!entry || entry.noDisplay || !desktopEntryName(entry) || !plainText(entry.id, 256)) continue;
         var score = desktopEntryScore(entry, query);
@@ -986,6 +1002,7 @@ var api = {
     addRecentApp: addRecentApp,
     desktopEntryName: desktopEntryName,
     desktopEntrySubtext: desktopEntrySubtext,
+    desktopEntryExecBase: desktopEntryExecBase,
     searchDesktopEntries: searchDesktopEntries,
     validatePort: validatePort,
     validateFavoriteIndex: validateFavoriteIndex,

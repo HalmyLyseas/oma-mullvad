@@ -314,8 +314,7 @@ Panel {
     for (var i = 0; i < source.length && i < 4096; i++) {
       var entry = source[i]
       if (!entry) continue
-      var firstWord = String(entry.execString || "").trim().split(/\s+/)[0] || ""
-      var execBase = firstWord.split("/").pop()
+      var execBase = Model.desktopEntryExecBase(entry)
       if (execBase) result.push({ name: Model.desktopEntryName(entry), execBase: execBase })
     }
     return result
