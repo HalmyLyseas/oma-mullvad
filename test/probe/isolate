@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Source inside a scratch-backed runner; never expose host launchers to QML.
+isolate() {
+  local base="$1" executable helper resolved socket="${WAYLAND_DISPLAY:-}"
+  [[ -z "$socket" || "$socket" == /* ]] || socket="$XDG_RUNTIME_DIR/$socket"
+  mkdir -p "$base/bin" "$base/home" "$base/home/.config" "$base/home/.cache" "$base/home/.local/share" "$base/home/.local/state" "$base/runtime" || return 1
+  chmod 700 "$base/runtime"
+  for executable in mullvad mullvad-exclude touch; do
+    ln -s "$plugin_dir/test/mocks/$executable" "$base/bin/$executable" || return 1
+    resolved="$(PATH="$base/bin" command -v "$executable")" || return 1
+    [[ "$(readlink -f "$resolved")" == "$(readlink -f "$plugin_dir/test/mocks/$executable")" ]] || return 1
+  done
+  for executable in uwsm-app gtk-launch gio xdg-open; do
+    ln -s "$plugin_dir/test/mocks/mullvad-exclude" "$base/bin/$executable" || return 1
+    [[ "$(readlink -f "$base/bin/$executable")" == "$(readlink -f "$plugin_dir/test/mocks/mullvad-exclude")" ]] || return 1
+  done
+  for executable in bash dirname readlink sleep head tr cat rm awk date mktemp setsid timeout find sort mkdir; do
+    helper="$(PATH=/usr/bin:/bin command -v "$executable")" || return 1
+    ln -s "$helper" "$base/bin/$executable" || return 1
+    [[ "$(readlink -f "$base/bin/$executable")" == "$(readlink -f "$helper")" ]] || return 1
+  done
+  export HOME="$base/home" XDG_CONFIG_HOME="$base/home/.config" XDG_CACHE_HOME="$base/home/.cache"
+  export XDG_DATA_HOME="$base/home/.local/share" XDG_STATE_HOME="$base/home/.local/state" XDG_RUNTIME_DIR="$base/runtime"
+  if [[ -n "$socket" ]]; then export WAYLAND_DISPLAY="$socket" GDK_BACKEND=wayland; fi
+  export PATH="$base/bin"
+}

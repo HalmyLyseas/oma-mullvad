@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+trusted_system_path=/usr/bin:/bin
+PATH="$trusted_system_path"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+node_bin="$(PATH="$trusted_system_path" command -v node)" || exit 1
+mkdir -p "$scratch/bin" "$scratch/home" "$scratch/config" "$scratch/cache" "$scratch/data" "$scratch/state" "$scratch/runtime"
+chmod 700 "$scratch/runtime"
+export HOME="$scratch/home" XDG_CONFIG_HOME="$scratch/config" XDG_CACHE_HOME="$scratch/cache"
+export XDG_DATA_HOME="$scratch/data" XDG_STATE_HOME="$scratch/state" XDG_RUNTIME_DIR="$scratch/runtime"
+for executable in bash dirname readlink cat awk; do
+  helper="$(PATH="$trusted_system_path" command -v "$executable")" || exit 1
+  ln -s "$helper" "$scratch/bin/$executable" || exit 1
+done
+ln -s "$root/test/mocks/mullvad" "$scratch/bin/mullvad" || exit 1
+resolved="$(PATH="$scratch/bin" command -v mullvad)" || exit 1
+[[ "$(readlink -f "$resolved")" == "$(readlink -f "$root/test/mocks/mullvad")" ]] || exit 1
+: > "$scratch/mock.log"
+MULLVAD_MOCK_MODE="${MULLVAD_MOCK_MODE:-cli-contract}" MULLVAD_MOCK_LOG="$scratch/mock.log" \
+  PATH="$scratch/bin" "$node_bin" "$root/tests/cli-contract.mjs"
+"$node_bin" "$root/tests/verify-cli-contract-log.mjs" "$scratch/mock.log"

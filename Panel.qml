@@ -27,6 +27,10 @@ Panel {
   property var recentLocations: []
   property var pendingConfirmation: null
   property bool syncingSettings: false
+  readonly property var _probePageItem: pageLoader.item
+  readonly property bool cliReady: service && service.installed && service.daemonRunning
+
+  function pageAvailable(index) { return index === 0 || (index >= 1 && index <= 3 && cliReady) }
 
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
@@ -37,10 +41,11 @@ Panel {
   readonly property string stateIcon: hostWidget ? hostWidget.stateIcon : "connecting"
   readonly property string tunnelHint: service.active ? "Disconnect Mullvad VPN" : "Connect Mullvad VPN"
 
-  function arrayFrom(value) {
+  function arrayFrom(value, limit) {
     if (!value || typeof value === "string" || typeof value.length !== "number") return []
     var result = []
-    for (var i = 0; i < value.length; i++) result.push(value[i])
+    var length = Math.min(value.length, limit === 512 ? 512 : 256)
+    for (var i = 0; i < length; i++) result.push(value[i])
     return result
   }
 
@@ -61,7 +66,7 @@ Panel {
 
   function locationFor(saved) {
     var key = locationKey(saved)
-    var locations = arrayFrom(service.locations)
+    var locations = arrayFrom(service.locations, 512)
     for (var i = 0; i < locations.length; i++)
       if (locationKey(locations[i]) === key) return locations[i]
     return null
@@ -79,7 +84,8 @@ Panel {
     recentLocations = Model.normalizeFavorites(arrayFrom(recents)).slice(0, 5)
     if (!bar || !bar.shell || typeof bar.shell.updateEntryInline !== "function") return
     var entry = { id: moduleName }
-    for (var key in settings) if (key !== "id") entry[key] = settings[key]
+    var currentSettings = hostWidget && hostWidget.settings ? hostWidget.settings : settings
+    for (var key in currentSettings) if (key !== "id") entry[key] = currentSettings[key]
     entry.favoriteLocations = favoriteLocations
     entry.recentLocations = recentLocations
     bar.shell.updateEntryInline(moduleName, entry)
@@ -115,7 +121,7 @@ Panel {
   }
 
   function cycleFavorite(direction) {
-    var available = Model.filterLocations(arrayFrom(service.locations), "", [], service.relayConstraints)
+    var available = Model.filterLocations(arrayFrom(service.locations, 512), "", [], service.relayConstraints)
     var result = Model.cycleFavorite(arrayFrom(favoriteLocations), available, {
       countryCode: service.currentCountryCode,
       cityCode: service.currentCityCode
@@ -137,12 +143,12 @@ Panel {
   }
 
   function filteredLocations() {
-    return Model.filterLocations(arrayFrom(service.locations), locationQuery,
+    return Model.filterLocations(arrayFrom(service.locations, 512), locationQuery,
                                  arrayFrom(favoriteLocations), service.relayConstraints)
   }
 
   function locationOptions() {
-    return Model.filterLocations(arrayFrom(service.locations), "", [], service.relayConstraints).map(function(location) {
+    return Model.filterLocations(arrayFrom(service.locations, 512), "", [], service.relayConstraints).map(function(location) {
       var servers = Model.filterServers(arrayFrom(location.servers), service.relayConstraints)
       var hints = []
       for (var i = 0; i < servers.length; i++)
@@ -211,7 +217,7 @@ Panel {
       return location ? location.city + ", " + location.country
         : String(constraint.countryCode || "").toUpperCase() + "/" + String(constraint.cityCode || "").toUpperCase()
     if (type === "country") {
-      var locations = arrayFrom(service.locations)
+      var locations = arrayFrom(service.locations, 512)
       for (var i = 0; i < locations.length; i++)
         if (String(locations[i].countryCode || "") === String(constraint.countryCode || ""))
           return locations[i].country + " · any city"
@@ -225,7 +231,7 @@ Panel {
     var exact = locationFor(constraint)
     if (exact) return exact
     if (String(constraint.type || "") !== "country") return null
-    var locations = arrayFrom(service.locations)
+    var locations = arrayFrom(service.locations, 512)
     for (var i = 0; i < locations.length; i++)
       if (String(locations[i].countryCode || "") === String(constraint.countryCode || "")) return locations[i]
     return null
@@ -235,7 +241,7 @@ Panel {
     if (!service.connected) return null
     var exact = locationFor({ countryCode: service.currentCountryCode, cityCode: service.currentCityCode })
     if (exact) return exact
-    var locations = arrayFrom(service.locations)
+    var locations = arrayFrom(service.locations, 512)
     for (var i = 0; i < locations.length; i++)
       if (String(locations[i].country || "").toLowerCase() === String(service.country || "").toLowerCase()
           && String(locations[i].city || "").toLowerCase() === String(service.city || "").toLowerCase()) return locations[i]
@@ -275,11 +281,32 @@ Panel {
   }
 
   function showPage(index) {
-    pageIndex = Math.max(0, Math.min(3, index))
+    var target = Math.max(0, Math.min(3, index))
+    if (!pageAvailable(target)) return
+    pageIndex = target
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
   }
 
-  function movePage(delta) { showPage((pageIndex + delta + 4) % 4) }
+  function movePage(delta) {
+    var next = pageIndex
+    for (var i = 0; i < 4; i++) {
+      next = (next + delta + 4) % 4
+      if (pageAvailable(next)) { showPage(next); return }
+    }
+  }
+
+  function handleTextKey(text) {
+    if (text === "1") showPage(0)
+    else if (text === "2") showPage(1)
+    else if (text === "3") showPage(2)
+    else if (text === "4") showPage(3)
+    else if (text === "r" || text === "R") service.refreshAll()
+    else if ((text === "t" || text === "T") && cliReady) service.toggleTunnel()
+    else if ((text === "n" || text === "N") && cliReady) cycleFavorite(1)
+    else if ((text === "p" || text === "P") && cliReady) cycleFavorite(-1)
+  }
+
+  onCliReadyChanged: if (!pageAvailable(pageIndex)) showPage(0)
 
   function moveScroll(delta) {
     if (!pageFlick) return
@@ -384,19 +411,10 @@ Panel {
         if (dx) root.movePage(dx)
         else root.moveScroll(dy)
       }
-      onActivateRequested: service.toggleTunnel()
+      onActivateRequested: if (root.cliReady) service.toggleTunnel()
       onCloseRequested: root.close()
       onTabRequested: function(direction) { root.focusNext(direction) }
-      onTextKey: function(text) {
-        if (text === "1") root.showPage(0)
-        else if (text === "2") root.showPage(1)
-        else if (text === "3") root.showPage(2)
-        else if (text === "4") root.showPage(3)
-        else if (text === "r" || text === "R") service.refreshAll()
-        else if (text === "t" || text === "T") service.toggleTunnel()
-        else if (text === "n" || text === "N") root.cycleFavorite(1)
-        else if (text === "p" || text === "P") root.cycleFavorite(-1)
-      }
+      onTextKey: function(text) { root.handleTextKey(text) }
 
       Column {
         id: panelColumn
@@ -415,7 +433,9 @@ Panel {
               Layout.fillWidth: true
               text: modelData
               selected: root.pageIndex === index
-              focusable: true
+              enabled: root.pageAvailable(index)
+              opacity: root.pageAvailable(index) ? 1 : 0.35
+              focusable: root.pageAvailable(index)
               foreground: root.foreground
               fontFamily: root.fontFamily
               horizontalPadding: Style.spacing.md
@@ -491,7 +511,8 @@ Panel {
         implicitHeight: overviewHero.implicitHeight
         readonly property bool tunnelChecked: service.active
         readonly property bool tunnelBusy: service.busy || !service.installed || !service.daemonRunning
-        readonly property string tunnelTooltip: root.tunnelHint
+        readonly property string tunnelTooltip: root.cliReady ? root.tunnelHint
+          : !service.installed ? "Install Mullvad VPN first" : "Start the Mullvad daemon first"
         readonly property color controlAccent: root.accent
         function toggleTunnel() { if (!tunnelBusy) service.toggleTunnel() }
 
@@ -516,7 +537,9 @@ Panel {
               id: tunnelSwitch
               checked: overviewHeader.tunnelChecked
               busy: overviewHeader.tunnelBusy
-              activeFocusOnTab: true
+              enabled: root.cliReady
+              opacity: root.cliReady ? 1 : 0.35
+              activeFocusOnTab: root.cliReady
               hasCursor: activeFocus
               foreground: overviewHero.foreground
               accent: overviewHeader.controlAccent
@@ -540,6 +563,18 @@ Panel {
         visible: service.connected && (service.country !== "" || service.ip !== "")
         width: parent.width
         text: "Exit: " + [service.city, service.country, service.hostname, service.ip].filter(function(value) { return String(value || "") !== "" }).join(" · ")
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
+      }
+
+      Text {
+        objectName: "overviewActionStatus"
+        textFormat: Text.PlainText
+        visible: service.actionStatus !== "" && service.actionStatus !== service.lastError
+        width: parent.width
+        text: service.actionStatus
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.bodySmall
@@ -575,30 +610,13 @@ Panel {
           text: service.state === "checking"
             ? "Checking for Mullvad VPN…"
             : !service.installed
-            ? "Mullvad CLI was not found. Use the install button below or install Mullvad with your preferred method."
+            ? "Mullvad CLI was not found. Install Mullvad separately with your preferred method, then press refresh."
             : "The Mullvad daemon is unavailable. Start mullvad-daemon, then press refresh."
           color: root.urgent
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
           wrapMode: Text.WordWrap
         }
-      }
-
-      Button {
-        visible: !service.installed && service.state === "unavailable"
-        width: parent.width
-        text: "Install Mullvad VPN (AUR)"
-        bordered: true
-        focusable: true
-        foreground: root.foreground
-        onClicked: root.confirmAction(
-          "Install the mullvad-vpn-bin package from the AUR? A terminal will open and ask for your sudo password.",
-          function() {
-            Quickshell.execDetached([
-              "omarchy-launch-floating-terminal-with-presentation",
-              "omarchy pkg aur add mullvad-vpn-bin"
-            ])
-          })
       }
 
       BorderSurface {
@@ -649,6 +667,7 @@ Panel {
 
       BorderSurface {
         id: relayMap
+        visible: root.cliReady
         width: parent.width
         height: Math.round(width * 0.50)
         color: Util.alpha(root.foreground, 0.025)
@@ -667,7 +686,7 @@ Panel {
       }
 
       OmaDropdown {
-        visible: root.favoriteOptions().length > 1
+        visible: root.cliReady && root.favoriteOptions().length > 1
         width: parent.width
         label: "Quick select favourite"
         options: root.favoriteOptions()
@@ -689,7 +708,8 @@ Panel {
         triggerLabel: root.relayTargetLabel()
         options: root.locationOptions()
         value: root.constraintKey((service.relayConstraints || {}).location)
-        enabled: !service.busy
+        enabled: !service.busy && root.cliReady
+        opacity: root.cliReady ? 1 : 0.35
         foreground: root.foreground
         fontFamily: root.fontFamily
         onChanged: function(value) {
@@ -703,6 +723,8 @@ Panel {
 
       Column {
         visible: !service.loggedIn
+        enabled: root.cliReady
+        opacity: root.cliReady ? 1 : 0.35
         width: parent.width
         spacing: Style.space(8)
 
@@ -782,7 +804,7 @@ Panel {
           text: "Logout"
           focusable: true
           bordered: true
-          enabled: !service.busy
+          enabled: !service.busy && root.cliReady
           foreground: root.urgent
           onClicked: root.confirmAction("Log out of the Mullvad account on this device?", function() { service.logout() })
         }
@@ -796,7 +818,8 @@ Panel {
         label: "Lockdown mode"
         description: "Block all network access whenever Mullvad is disconnected"
         checked: service.lockdown
-        enabled: !service.busy && service.installed
+        enabled: !service.busy && root.cliReady
+        opacity: root.cliReady ? 1 : 0.35
         foreground: root.foreground
         fontFamily: root.fontFamily
         onClicked: service.setLockdown(!service.lockdown)
@@ -806,7 +829,8 @@ Panel {
         label: "Auto-connect"
         description: "Connect Mullvad when its daemon starts"
         checked: service.autoConnect
-        enabled: !service.busy && service.installed
+        enabled: !service.busy && root.cliReady
+        opacity: root.cliReady ? 1 : 0.35
         foreground: root.foreground
         fontFamily: root.fontFamily
         onClicked: service.setAutoConnect(!service.autoConnect)
@@ -816,7 +840,8 @@ Panel {
         label: "Local network sharing"
         description: "Allow access to devices on the local network"
         checked: service.lanSharing
-        enabled: !service.busy && service.installed
+        enabled: !service.busy && root.cliReady
+        opacity: root.cliReady ? 1 : 0.35
         foreground: root.foreground
         fontFamily: root.fontFamily
         onClicked: service.setLanSharing(!service.lanSharing)

@@ -1,40 +1,77 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+trusted_system_path=/usr/bin:/bin
+PATH="$trusted_system_path"
 probe_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin_dir="$(cd "$probe_dir/../.." && pwd)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 failures=0
+source "$probe_dir/isolate"
 
-if ! command -v qs >/dev/null 2>&1; then
-  echo "mock Process probe skipped: qs is unavailable"
-  exit 0
+# Quickshell confines relative imports to the probe root.
+cp "$plugin_dir/Model.js" "$scratch/" || exit 1
+sed 's|import "../../Model.js" as Model|import "Model.js" as Model|' \
+  "$probe_dir/service-probe.qml" > "$scratch/service-probe.qml" || exit 1
+
+qs_bin="$(PATH="$trusted_system_path" command -v qs || true)"
+timeout_bin="$(PATH="$trusted_system_path" command -v timeout || true)"
+if [[ -z "$qs_bin" ]]; then
+  echo "mock Process probe requires qs" >&2
+  exit 1
 fi
+[[ -n "$timeout_bin" ]] || { echo "mock Process probe requires timeout" >&2; exit 1; }
 
-field() {
-  node -e 'const v=JSON.parse(process.argv[1])[process.argv[2]]; process.stdout.write(v == null ? "" : String(v))' "$1" "$2"
+check_json() {
+  local json="$1" label="$2"
+  shift 2
+  if node "$probe_dir/json-assert.mjs" "$json" "$@"; then
+    printf 'ok - %s\n' "$label"
+  else
+    printf 'not ok - %s\n' "$label"
+    failures=$((failures + 1))
+  fi
 }
 
-check() {
-  if eval "$1"; then printf 'ok - %s\n' "$2"; else printf 'not ok - %s\n' "$2"; failures=$((failures + 1)); fi
+check_command() {
+  local label="$1"
+  shift
+  if "$@"; then
+    printf 'ok - %s\n' "$label"
+  else
+    printf 'not ok - %s\n' "$label"
+    failures=$((failures + 1))
+  fi
 }
 
 run_case() {
   local name="$1" mode="$2" scenario="$3"
-  local path_dir="$scratch/$name-bin"
-  mkdir -p "$path_dir"
-  ln -s "$plugin_dir/test/mocks/mullvad" "$path_dir/mullvad"
+  local listen_script=""
+  [[ "$scenario" == state-sequence ]] && listen_script="$plugin_dir/test/fixtures/listen-sequence.txt"
+  [[ "$scenario" == status-race ]] && listen_script="$plugin_dir/test/fixtures/listen-race.txt"
+  isolate "$scratch/$name" || return 1
+  local isolated_path="$PATH"
+  PATH="$trusted_system_path"
   : > "$scratch/$name.mock"
   MULLVAD_MOCK_MODE="$mode" MULLVAD_MOCK_LOG="$scratch/$name.mock" \
+    MULLVAD_MOCK_LISTEN_SCRIPT="$listen_script" \
+    MULLVAD_MOCK_STATUS_DELAY_TRIGGER="$scratch/$name.delay" \
+    MULLVAD_MOCK_AVAILABILITY_STATE="$scratch/$name.availability" \
+    MULLVAD_MOCK_AVAILABILITY_TRIGGER="$scratch/$name.availability-trigger" \
+    MULLVAD_MOCK_TOUCH_TARGET="$(if [[ -n "$listen_script" ]]; then printf %s "$scratch/$name.delay"; else printf %s "$scratch/$name.availability-trigger"; fi)" \
     MULLVAD_PROBE_SCENARIO="$scenario" MULLVAD_PLUGIN_DIR="$plugin_dir" \
-    PATH="$path_dir:$PATH" timeout 20 qs -n -p "$probe_dir/service-probe.qml" \
+    PATH="$isolated_path" "$timeout_bin" -k 2 20 "$qs_bin" -n -p "$scratch/service-probe.qml" \
     > "$scratch/$name.log" 2>&1
-  grep -o 'PROBE_RESULT .*' "$scratch/$name.log" | tail -n1 | sed 's/^PROBE_RESULT //'
+  local command_status=$?
+  "$probe_dir/collect-result" "$scratch/$name.log" "$command_status" "$scratch/$name.mock" || {
+    head -c 65536 "$scratch/$name.log" >&2
+    return 1
+  }
 }
 
 check_orphans() {
-  local name="$1" leaked=0
+  local name="$1" leaked=0 state
   while read -r pid; do
     [[ -z "$pid" ]] && continue
     if kill -0 "$pid" 2>/dev/null; then
@@ -42,44 +79,95 @@ check_orphans() {
       if [[ "$state" != Z ]]; then leaked=1; kill -9 "$pid" 2>/dev/null || true; fi
     fi
   done < <(sed -n 's/^PID=\([0-9]*\).*/\1/p' "$scratch/$name.mock" | sort -u)
-  check "[[ $leaked -eq 0 ]]" "$name leaves no live mock process"
+  if [[ "$leaked" -eq 0 ]]; then
+    printf 'ok - %s\n' "$name leaves no live mock process"
+  else
+    printf 'not ok - %s\n' "$name leaves no live mock process"
+    failures=$((failures + 1))
+  fi
 }
 
 json="$(run_case ok ok login)"
-check "[[ -n '$json' ]]" "ok probe completes"
-check "[[ \"$(field "$json" installed)\" == true && \"$(field "$json" daemonRunning)\" == true ]]" "reads populate service state"
-check "[[ \"$(field "$json" cliVersion)\" == 2026.4 && \"$(field "$json" cliVersionSupported)\" == true ]]" "direct probe preserves CLI-version support state"
-check "[[ \"$(field "$json" locations)\" -gt 0 ]]" "relay data parses"
-check "grep -q 'login-received-len=16' '$scratch/ok.mock'" "login stdin reaches direct child"
+check_json "$json" "ok probe completes" note empty ignored
+check_json "$json" "reads populate service state" installed eq true daemonRunning eq true
+check_json "$json" "direct probe preserves CLI-version support state" cliVersion eq 2026.4 cliVersionSupported eq true
+check_json "$json" "relay data parses" locations gt 0
+check_command "login stdin reaches direct child" grep -q 'login-received-len=16' "$scratch/ok.mock"
 check_orphans ok
 
 json="$(run_case hang hang none)"
-check "[[ \"$(field "$json" readWatchdogs)\" -eq 1 ]]" "read watchdog fires once"
-check "[[ \"$(field "$json" lastError)\" == *timed\ out* ]]" "read timeout is surfaced"
+check_json "$json" "read watchdog fires once" readWatchdogs eq 1
+check_json "$json" "read timeout is surfaced" lastError contains 'timed out'
 check_orphans hang
 
 json="$(run_case flood flood none)"
-check "[[ \"$(field "$json" readOverflows)\" -eq 1 ]]" "streaming output limit fires once"
-check "[[ \"$(field "$json" readChars)\" -le 262144 ]]" "retained output stays bounded"
+check_json "$json" "streaming output limit fires once" readOverflows eq 1
+check_json "$json" "retained output stays bounded" readChars le 262144
 check_orphans flood
 
 json="$(run_case listener-flood listener-flood listener-flood)"
-check "[[ \"$(field "$json" listenerOverflows)\" -ge 1 ]]" "listener rejects an unterminated over-limit line"
-check "[[ \"$(field "$json" lastError)\" == *output\ limit\ exceeded* ]]" "listener overflow is surfaced"
+check_json "$json" "listener rejects an unterminated over-limit line" listenerOverflows ge 1
+check_json "$json" "listener overflow is surfaced" lastError contains 'output limit exceeded'
 check_orphans listener-flood
 
 json="$(run_case action action-hang action-hang)"
-check "[[ \"$(field "$json" actionWatchdogs)\" -eq 1 ]]" "action watchdog fires once"
-check "[[ \"$(field "$json" lastError)\" == *timed\ out* ]]" "action timeout is surfaced"
+check_json "$json" "action watchdog fires once" actionWatchdogs eq 1
+check_json "$json" "action timeout is surfaced" lastError contains 'timed out'
 check_orphans action
 
 json="$(run_case fail fail none)"
-check "[[ -n '$json' && -z \"$(field "$json" note)\" ]]" "read queue drains after command failures"
+check_json "$json" "read queue drains after command failures" note empty ignored
 check_orphans fail
 
 json="$(run_case removed removed removed)"
-check "[[ \"$(field "$json" installed)\" == false && -z \"$(field "$json" note)\" ]]" "missing binary finalizes without wedging the queue"
-check "[[ \"$(field "$json" lastError)\" == *not\ found* ]]" "failed start is surfaced"
+check_json "$json" "missing binary finalizes without wedging the queue" installed eq false note empty ignored
+check_json "$json" "failed start is surfaced" lastError contains 'not found'
 check_orphans removed
+
+
+json="$(run_case status-garbage status-garbage none)"
+check_json "$json" "exit-zero malformed status never claims readiness" daemonRunning eq false lastError contains 'Could not parse Mullvad status' note empty ignored
+json="$(run_case listener-malformed listener-malformed listener-malformed)"
+check_json "$json" "same-chunk malformed events preserve valid disconnect and sequence" note empty ignored finalState eq disconnected finalConnected eq false
+
+json="$(run_case sequence ok state-sequence)"
+check_json "$json" "listener sequence exposes every protection-state transition" stateTrace contains connecting stateTrace contains connected stateTrace contains error stateTrace contains disconnected
+check_json "$json" "listener sequence settles truthfully disconnected" finalState eq disconnected finalConnected eq false
+check_orphans sequence
+
+json="$(run_case race ok status-race)"
+check_json "$json" "stale delayed poll cannot overwrite a newer listener event" finalState eq connected finalConnected eq true
+check_orphans race
+
+json="$(run_case mutations ok mutations)"
+check_json "$json" "all mutation families drain through the mocked service" note empty ignored mutationStep eq 8 busyGateObserved eq true
+for argv in \
+  'ARGV: connect' 'ARGV: disconnect' \
+  'ARGV: relay set location se got' 'ARGV: relay set location se got se-got-wg-001' \
+  'ARGV: lockdown-mode set on' 'ARGV: auto-connect set on' 'ARGV: lan set allow' \
+  'ARGV: relay set provider Example' 'ARGV: relay set ownership owned' \
+  'ARGV: relay set ip-version ipv4' \
+  'ARGV: relay set multihop on' 'ARGV: relay set entry location se got' \
+  'ARGV: dns set default --block-ads --block-malware' 'ARGV: dns set custom 1.1.1.1' \
+  'ARGV: anti-censorship set mode udp2tcp' 'ARGV: anti-censorship set udp2tcp --port 443' \
+  'ARGV: account login' 'ARGV: account logout' \
+  'ARGV: split-tunnel delete 1234' 'ARGV: split-tunnel delete 5678'; do
+  check_command "mutation uses fixed argv: ${argv#ARGV: }" grep -Fq "$argv" "$scratch/mutations.mock"
+done
+check_command "account secret never reaches the mock log" bash -c '! grep -Eq "[0-9]{16}" "$1"' _ "$scratch/mutations.mock"
+check_command "successful mutation refreshes authoritative state afterward" node "$probe_dir/log-order.mjs" "$scratch/mutations.mock" 'ARGV: connect' 'ARGV: status --json'
+check_command "excluded launch stays inside the inert boundary" grep -Fq 'mullvad-exclude <uwsm-app> <--> <gtk-launch> <org.example.Safe.desktop>' "$scratch/mutations.mock"
+check_orphans mutations
+
+json="$(run_case partial-batch partial-batch partial-batch)"
+check_json "$json" "partial excluded-PID failure stops the batch and later actions recover" note empty ignored partialFailureObserved eq true recoverySucceeded eq true
+check_command "partial batch attempted its first fixed PID only" grep -Fq 'ARGV: split-tunnel delete 1234' "$scratch/partial-batch.mock"
+check_command "partial batch did not run a stale queued PID" bash -c '! grep -Fq "ARGV: split-tunnel delete 5678" "$1"' _ "$scratch/partial-batch.mock"
+check_command "service accepted a fixed-argv action after failure" grep -Fq 'ARGV: disconnect' "$scratch/partial-batch.mock"
+check_orphans partial-batch
+
+json="$(run_case availability-recovery availability-recovery availability-recovery)"
+check_json "$json" "CLI and daemon disappearance clear readiness and recover" note empty ignored cliDisappeared eq true cliRecovered eq true daemonDisappeared eq true daemonRecovered eq true
+check_orphans availability-recovery
 
 exit "$((failures > 0))"

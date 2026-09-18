@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+PATH=/usr/bin:/bin
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+omarchy_shell_dir="${OMARCHY_SHELL_DIR:-/usr/share/omarchy/shell}"
+validator="${OMARCHY_PLUGIN_VALIDATOR:-/usr/share/omarchy/bin/omarchy-plugin-validate}"
+qmllint_bin="$(command -v qmllint || command -v /usr/lib/qt6/bin/qmllint)"
+[[ -d "$omarchy_shell_dir" && -x "$validator" ]] || { echo "Omarchy shell and validator are required" >&2; exit 1; }
+for executable in node qs cage timeout; do command -v "$executable" >/dev/null || exit 1; done
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+mkdir -p "$scratch/imports" "$scratch/runtime"
+chmod 700 "$scratch/runtime"
+ln -s "$omarchy_shell_dir" "$scratch/imports/qs"
+export OMARCHY_SHELL_DIR="$omarchy_shell_dir"
+for file in "$root"/*.qml "$root/test/probe"/*.qml; do
+  "$qmllint_bin" -I "$scratch/imports" -I "$omarchy_shell_dir" "$file"
+done
+"$validator" "$root"
+for file in "$root/test/all" "$root/test/ci-local" "$root/test/probe"/run* \
+  "$root/test/probe/isolate" "$root/test/probe/collect-result" "$root/test/mocks"/* "$root/tests/run-cli-contract"; do
+  bash -n "$file"
+done
+for file in "$root/tests"/*.js "$root/tests"/*.mjs "$root/test/probe"/*.mjs; do node --check "$file"; done
+env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_RENDERER=pixman \
+  WLR_LIBINPUT_NO_DEVICES=1 XDG_RUNTIME_DIR="$scratch/runtime" QT_QUICK_BACKEND=software \
+  cage -- bash "$root/test/all"
+printf 'test/ci-local: ALL SUITES PASSED\n'

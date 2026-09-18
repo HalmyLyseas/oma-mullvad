@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -uo pipefail
+PATH=/usr/bin:/bin
+probe_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+plugin_dir="$(cd "$probe_dir/../.." && pwd)"
+omarchy_shell_dir="${OMARCHY_SHELL_DIR:-/usr/share/omarchy/shell}"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+qs_bin="$(command -v qs)" || exit 1
+timeout_bin="$(command -v timeout)" || exit 1
+source "$probe_dir/isolate"
+isolate "$scratch/environment" || exit 1
+isolated_path="$PATH"
+PATH=/usr/bin:/bin
+mkdir -p "$HOME/.config/omarchy/plugins" "$scratch/omarchy/config/omarchy" "$scratch/omarchy/shell/plugins" "$scratch/qmlroot"
+ln -s "$omarchy_shell_dir" "$scratch/qmlroot/qs"
+ln -s "$plugin_dir" "$HOME/.config/omarchy/plugins/io.github.kallupx.oma-mullvad"
+printf '%s\n' '{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[{"id":"io.github.kallupx.oma-mullvad","refreshIntervalSec":30,"siblingValue":"preserved","favoriteLocations":[{"countryCode":"se","cityCode":"got","country":"Sweden","city":"Gothenburg"}],"recentLocations":[{"countryCode":"de","cityCode":"ber","country":"Germany","city":"Berlin"}]}]}},"plugins":["io.github.kallupx.oma-mullvad"]}' > "$HOME/.config/omarchy/shell.json"
+printf '%s\n' '{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[]}},"plugins":[]}' > "$scratch/omarchy/config/omarchy/shell.json"
+: > "$scratch/mock.log"
+OMARCHY_PATH="$scratch/omarchy" OMARCHY_SHELL_DIR="$omarchy_shell_dir" \
+  MULLVAD_PLUGIN_MANIFEST="$plugin_dir/manifest.json" \
+  MULLVAD_MOCK_MODE=ok MULLVAD_MOCK_LOG="$scratch/mock.log" \
+  QML_IMPORT_PATH="$scratch/qmlroot" PATH="$isolated_path" \
+  "$timeout_bin" -k 2 20 "$qs_bin" -n -p "$probe_dir/scoped-settings-probe.qml" > "$scratch/scoped-settings.log" 2>&1
+command_status=$?
+json="$("$probe_dir/collect-result" "$scratch/scoped-settings.log" "$command_status" "$scratch/mock.log")" || { head -c 65536 "$scratch/scoped-settings.log" >&2; exit 1; }
+node "$probe_dir/json-assert.mjs" "$json" \
+  note empty ignored actualProductComponent eq true serviceIsHostSingleton eq true \
+  panelServiceMatches eq true initialFavorites eq 1 initialRecents eq 1 \
+  foreignRejected eq true ownService eq true foreignServiceRejected eq true scopedAppLibraryAbsent eq true \
+  siblingPreserved eq true externalEditObserved eq true \
+  recreatedUiState eq true stalePanelPreservedFreshFields eq true \
+  invalidRejected eq true invalidWriteRefused eq true deletedRejected eq true deletedPanelRefused eq true \
+  recoveredPanelState eq true recreatedSaved eq true recreatedSiblingPreserved eq true finalRecents eq 1 || exit 1
+printf 'ok - real scoped host Service, Panel, BarWidget and settings lifecycle\n'

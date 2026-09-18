@@ -75,7 +75,8 @@ Item {
   property string _actionErrorRemainder: ""
   property int _actionOutputLines: 0
   property int _actionOutputChars: 0
-  readonly property bool busy: actionProcess.running || _actionQueue.length > 0
+  property bool _actionArmed: false
+  readonly property bool busy: _actionArmed || actionProcess.running || _actionQueue.length > 0
     || readProcess.running || _readQueue.length > 0
   property bool _readWatchdogFired: false
   property bool _actionWatchdogFired: false
@@ -222,12 +223,13 @@ Item {
   }
 
   function refreshStatus() {
-    if (installed) _enqueueRead("status", ["mullvad", "status", "--json"])
+    if (installed && daemonRunning) _enqueueRead("status", ["mullvad", "status", "--json"])
     else refreshAll()
   }
 
   function _applyStatus(raw, seq) {
     if (seq !== undefined && seq < root._statusApplySeq) return
+    if (!Model.isStatusSnapshot(raw)) throw new Error("Could not parse Mullvad status")
     var parsed = Model.parseStatus(raw)
     state = String(parsed.state || "unknown")
     connected = parsed.connected === true
@@ -293,8 +295,8 @@ Item {
 
     var combined = String(raw || "") + "\n" + String(error || "")
     if (kind === "status") {
+      if (root._pendingStatusSeq < root._statusApplySeq) return
       if (exitCode !== 0) {
-        if (root._pendingStatusSeq < root._statusApplySeq) return
         daemonRunning = false
         connected = false
         state = "unavailable"
@@ -406,8 +408,10 @@ Item {
   }
 
   function _command(action, params) {
-    if (!installed) {
-      lastError = "Mullvad CLI not found. Install Mullvad VPN, then refresh."
+    if (!installed || !daemonRunning) {
+      lastError = !installed ? "Mullvad CLI not found. Install Mullvad VPN, then refresh."
+        : "Mullvad daemon unavailable. Open Mullvad VPN or start mullvad-daemon, then refresh."
+      actionStatus = lastError
       return null
     }
     try {
@@ -441,6 +445,7 @@ Item {
     actionProcess.secret = secret || ""
     actionProcess.command = command
     actionStatus = label + "…"
+    _actionArmed = true
     actionProcess.running = true
   }
 
@@ -754,9 +759,10 @@ Item {
       lastError = _shortError(line, "Mullvad status listener failed")
       return
     }
-    if (!Model.isTunnelStateEvent(line)) return
     try {
-      _applyStatus(line, ++_statusSeq)
+      if (!Model.isTunnelStateEvent(line)) return
+      _applyStatus(line, _statusSeq + 1)
+      _statusSeq++
     } catch (e) {
       lastError = _shortError(e, "Could not parse live Mullvad status")
     }
@@ -785,6 +791,7 @@ Item {
   }
 
   function _finalizeAction(exitCode, exitStatus, startError) {
+    _actionArmed = false
     actionWatchdog.stop()
     actionKillTimer.stop()
     actionProcess.secret = ""

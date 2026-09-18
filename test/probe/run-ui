@@ -1,0 +1,93 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+trusted_system_path=/usr/bin:/bin
+PATH="$trusted_system_path"
+probe_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+plugin_dir="$(cd "$probe_dir/../.." && pwd)"
+omarchy_shell_dir="${OMARCHY_SHELL_DIR:-/usr/share/omarchy/shell}"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+failures=0
+
+qs_bin="$(PATH="$trusted_system_path" command -v qs || true)"
+timeout_bin="$(PATH="$trusted_system_path" command -v timeout || true)"
+if [[ -z "$qs_bin" ]]; then
+  echo "UI probe requires qs" >&2
+  exit 1
+fi
+[[ -n "$timeout_bin" ]] || { echo "UI probe requires timeout" >&2; exit 1; }
+
+mkdir -p "$scratch/qmlroot" "$scratch/bin"
+ln -s "$omarchy_shell_dir" "$scratch/qmlroot/qs"
+source "$probe_dir/isolate"
+
+check_json() {
+  local json="$1" label="$2"
+  shift 2
+  if node "$probe_dir/json-assert.mjs" "$json" "$@"; then
+    printf 'ok - %s\n' "$label"
+  else
+    printf 'not ok - %s\n' "$label"
+    failures=$((failures + 1))
+  fi
+}
+
+run_case() {
+  local scenario="$1" log="$scratch/$1.log" mocklog="$scratch/$1.mock"
+  isolate "$scratch/$scenario" || return 1
+  local isolated_path="$PATH"
+  PATH="$trusted_system_path"
+  local mode=ok
+  : > "$mocklog"
+  MULLVAD_MOCK_MODE="$mode" MULLVAD_MOCK_LOG="$mocklog" \
+    MULLVAD_UI_SCENARIO="$scenario" MULLVAD_PLUGIN_DIR="$plugin_dir" \
+    QML_IMPORT_PATH="$scratch/qmlroot" PATH="$isolated_path" \
+    "$timeout_bin" -k 2 20 "$qs_bin" -n -p "$probe_dir/ui-probe.qml" > "$log" 2>&1
+  local command_status=$?
+  "$probe_dir/collect-result" "$log" "$command_status" "$mocklog" || {
+    head -c 65536 "$log" >&2
+    return 1
+  }
+}
+
+json="$(run_case action-feedback)"
+check_json "$json" "Overview renders plain action feedback and hides duplicate errors" note empty ignored message eq 'Updating lockdown…' duplicateHidden eq true plainText eq true
+
+json="$(run_case state-icons)"
+check_json "$json" "real BarWidget and Panel instantiate without engine errors" note empty ignored
+check_json "$json" "Panel receives the singleton service" panelLoaded eq true panelServiceMatches eq true
+check_json "$json" "bar icon follows service truth" connectedIcon eq connected errorIcon eq error
+check_json "$json" "error state reaches the bar tooltip" errorTooltip contains error
+
+json="$(run_case lifecycle)"
+check_json "$json" "service-null lifecycle completes without engine errors" note empty ignored
+check_json "$json" "Panel exists while the service exists" firstPanelLoaded eq true
+check_json "$json" "Panel Loader deactivates when the service disappears" loaderInactive eq true loaderStatusNull eq true
+check_json "$json" "stale Panel is destroyed" panelDestroyed eq true
+
+json="$(run_case widget-reload)"
+check_json "$json" "widget reload preserves the keepLoaded service instance" note empty ignored sameService eq true
+check_json "$json" "reloaded widget injects the retained service into its panel" panelServiceMatches eq true
+
+json="$(run_case replacement-bar)"
+check_json "$json" "replacement bar without service access destroys the panel" note empty ignored panelDestroyed eq true
+check_json "$json" "replacement bar renders an explicit unavailable state" unavailableTooltip eq 'Mullvad controls unavailable in this bar'
+
+json="$(run_case availability-cli)"
+check_json "$json" "Overview remains available without the CLI" barGuarded eq true cliReady eq false overviewAvailable eq true
+check_json "$json" "CLI-dependent pages lock without the CLI" locationsAvailable eq false advancedAvailable eq false excludedAvailable eq false
+check_json "$json" "unavailable CLI cannot navigate away from Overview" selectedPage eq 0 barTooltip contains 'not installed'
+
+json="$(run_case availability-daemon)"
+check_json "$json" "daemon unavailability keeps the panel on Overview" barGuarded eq true cliReady eq false selectedPage eq 0
+check_json "$json" "daemon-dependent pages and tunnel UI remain unavailable" locationsAvailable eq false barTooltip contains daemon barTooltip contains unavailable
+
+json="$(run_case availability-ready)"
+check_json "$json" "pages unlock when CLI and daemon are ready" cliReady eq true advancedAvailable eq true
+check_json "$json" "ready panel can navigate to Advanced" selectedPage eq 2
+
+json="$(run_case settings-fresh-merge)"
+check_json "$json" "stale panel writes merge the current scoped-host entry" note empty ignored refreshIntervalSec eq 99 siblingValue eq preserve-me favoriteCount eq 1
+
+exit "$((failures > 0))"

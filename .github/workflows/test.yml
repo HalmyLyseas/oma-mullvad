@@ -10,10 +10,40 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    container: archlinux:latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        omarchy: [v4.0.3, v4.0.4]
+    env:
+      OMARCHY_SHELL_DIR: /tmp/omarchy/shell
+      OMARCHY_PLUGIN_VALIDATOR: /tmp/omarchy/bin/omarchy-plugin-validate
     steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm git quickshell cage nodejs jq qt6-declarative
+
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - run: node --test
+
+      - name: Trust the checkout
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Clone exact Omarchy source
+        run: |
+          git clone --depth 1 --branch "${{ matrix.omarchy }}" https://github.com/basecamp/omarchy.git /tmp/omarchy
+          test "$(git -C /tmp/omarchy describe --tags --exact-match)" = "${{ matrix.omarchy }}"
+          test -d "$OMARCHY_SHELL_DIR"
+          test -x "$OMARCHY_PLUGIN_VALIDATOR"
+
+      - name: Validate against Omarchy ${{ matrix.omarchy }}
+        env:
+          WLR_BACKENDS: headless
+          WLR_RENDERER: pixman
+          WLR_LIBINPUT_NO_DEVICES: "1"
+          XDG_RUNTIME_DIR: /tmp/xdg-runtime
+          QT_QUICK_BACKEND: software
+        run: |
+          mkdir -p "$XDG_RUNTIME_DIR"
+          chmod 700 "$XDG_RUNTIME_DIR"
+          bash test/ci-local

@@ -2,7 +2,16 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
+const here = dirname(fileURLToPath(import.meta.url));
+const modelSource = readFileSync(join(here, "..", "Model.js"), "utf8")
+  .replace(/^\.pragma library\s*/, "");
+const modelExports = { exports: {} };
+new Function("module", "exports", modelSource)(modelExports, modelExports.exports);
+const Model = modelExports.exports;
 const ACCOUNT = /\b\d{16}\b/g;
 
 function ensureNoAccount(value, label) {
@@ -19,11 +28,6 @@ function readOnly(args) {
   };
 }
 
-function skip(reason) {
-  console.log(`SKIP: ${reason}`);
-  process.exit(0);
-}
-
 function check(args, test) {
   const result = readOnly(args);
   assert.equal(result.status, 0, `mullvad ${args.join(" ")} failed: ${result.stderr.trim()}`);
@@ -32,18 +36,19 @@ function check(args, test) {
 }
 
 const version = readOnly(["--version"]);
-if (version.error?.code === "ENOENT") skip("mullvad CLI is not installed");
+if (version.error?.code === "ENOENT") {
+  console.log("SKIP: mullvad CLI is not installed");
+  process.exit(0);
+}
 assert.equal(version.status, 0, "mullvad --version failed");
 ensureNoAccount(version.stdout, "version");
-assert.match(version.stdout.trim(), /^mullvad-cli 2026\.4(?:\.\d+)?$/, "OmaMullvad targets Mullvad CLI 2026.4");
+const cliVersion = Model.parseCliVersion(version.stdout);
+assert.ok(Model.isCliVersionSupported(cliVersion),
+  `installed mullvad-cli ${cliVersion || "(unparsed)"} is not in supported series ${Model.SUPPORTED_CLI_SERIES}`);
 
-const status = readOnly(["status", "--json"]);
-if (status.status !== 0) skip("Mullvad daemon is unavailable");
-ensureNoAccount(status.stdout, "status");
-const snapshot = JSON.parse(status.stdout);
-assert.ok(["connected", "connecting", "disconnected", "disconnecting", "error"].includes(snapshot.state));
-assert.equal(typeof snapshot.details, "object");
-
+check(["status", "--json"], output => {
+  assert.ok(Model.isStatusSnapshot(output), "Invalid Mullvad status snapshot");
+});
 check(["relay", "list"], output => {
   assert.match(output, /^[^\n]+ \([a-z]{2}\)$/m);
   assert.match(output, /^\t[^\n]+ \([a-z0-9-]+\) @ /m);
@@ -59,4 +64,4 @@ check(["dns", "get"], output => assert.match(output, /Custom DNS: (yes|no)/));
 check(["anti-censorship", "get"], output => assert.match(output, /mode: (auto|off|wireguard-port|udp2tcp|shadowsocks|quic|lwo)/));
 check(["split-tunnel", "list"], output => assert.match(output, /^Excluded PIDs:/));
 
-console.log("OmaMullvad Mullvad 2026.4 read-only CLI contract: ok");
+console.log(`OmaMullvad Mullvad ${cliVersion} read-only CLI contract: ok`);
