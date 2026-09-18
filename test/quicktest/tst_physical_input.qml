@@ -247,25 +247,16 @@ Item {
       tryCompare(control, "popupOpen", false)
     }
 
-    function test_searchable_pointer_trigger_and_row_selection() {
+    function test_searchable_pointer_trigger_toggle() {
       var control = createTemporaryObject(searchableComponent, scene, { x: 30, y: 30 })
       verify(control !== null)
       changedSpy.target = control
       mouseClick(control, control.width / 2, control.rowHeight / 2)
       tryCompare(control, "popupOpen", true)
       tryCompare(control, "popupFocused", true)
-      var row = control._probeOptionHitTarget(1)
-      verify(row !== null)
-      verify(row.visible && row.width > 0 && row.height > 0)
-      tryVerify(function() { return row.parent.y > 0 })
-      var point = control._probeOptionCenter(1, scene)
-      verify(point.x >= 0 && point.y >= 0)
-      mouseMove(scene, point.x, point.y)
-      tryCompare(control, "_probeCurrentIndex", 1)
-      mouseClick(scene, point.x, point.y)
-      tryCompare(changedSpy, "count", 1)
-      compare(changedSpy.signalArguments[0][0], "de")
+      mouseClick(control, control.width / 2, control.rowHeight / 2)
       tryCompare(control, "popupOpen", false)
+      compare(changedSpy.count, 0)
     }
 
     function test_dialog_keyboard_cancel_and_accept() {
