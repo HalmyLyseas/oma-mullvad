@@ -27,7 +27,7 @@ test("System is a fifth tab and remains available without the CLI or daemon", ()
     assert.match(panel, /model:\s*\["Overview", "Locations", "Advanced", "Excluded", "System"\]/);
     assert.match(panel, /function pageAvailable\(index\)\s*\{\s*return index === 0 \|\| index === 4 \|\| cliReady\s*\}/);
     assert.match(panel, /next = \(next \+ delta \+ 5\) % 5/);
-    assert.match(panel, /text === "5"\) root\.showPage\(4\)/);
+    assert.match(panel, /text === "5"\) showPage\(4\)/);
     assert.match(panel, /root\.pageIndex === 4 \? systemPage/);
 });
 
