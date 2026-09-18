@@ -279,6 +279,21 @@ test("recent excluded apps normalize, deduplicate, and cap at ten", () => {
         ["two.desktop", "one.desktop"]);
 });
 
+test("desktop launch IDs allow spaces and parentheses but reject unsafe path and shell syntax", () => {
+    for (const id of ["Disk Usage.desktop", "Zoom (Web).desktop"])
+        assert.deepEqual(Model.argv("launchExcluded", { desktopId: id }),
+            ["mullvad-exclude", "uwsm-app", "--", "gtk-launch", id]);
+
+    const rejected = [
+        "", "x".repeat(513), "bad\0id.desktop", "bad\rid.desktop", "bad\nid.desktop",
+        "-option.desktop", ".", "..", "../app.desktop", "folder/app.desktop",
+        "bad;id.desktop", "bad|id.desktop", "bad&id.desktop", "bad$id.desktop",
+        "bad`id.desktop", "bad'id.desktop", 'bad"id.desktop', "bad\\id.desktop"
+    ];
+    for (const desktopId of rejected)
+        assert.throws(() => Model.argv("launchExcluded", { desktopId }), /application/, desktopId);
+});
+
 test("trust-boundary validation accepts useful values and rejects malformed input", () => {
     assert.equal(Model.validatePort(53), true);
     assert.equal(Model.validatePort(0), false);

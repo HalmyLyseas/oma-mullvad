@@ -595,12 +595,13 @@ Item {
     var id = String(desktopId || "").trim()
     if (id.slice(-8) === ".desktop") id = id.slice(0, -8)
     var command = _command("launchExcluded", { desktopId: id + ".desktop" })
-    if (!command) return
+    if (!command) return false
     Quickshell.execDetached(command)
     actionStatus = "Launched outside the VPN"
     actionStatusTimer.restart()
     excludedRefresh.restart()
     excludedRefresh4s.restart()
+    return true
   }
 
   function refreshExcluded() {

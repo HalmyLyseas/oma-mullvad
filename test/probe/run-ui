@@ -96,4 +96,9 @@ check "[[ -z \"$(field "$json" queryAfterLaunch)\" && \"$(field "$json" updateId
 check "[[ \"$(field "$json" savedRecentFirst)\" == \"$(field "$json" recentFirst)\" && \"$(field "$json" refreshIntervalSec)\" == 30 ]]" "recent launch persistence preserves unrelated settings"
 check "[[ -z \"$(field "$json" queryAfterLeave)\" ]]" "leaving the Excluded tab clears stale search"
 
+json="$(run_case launch-result)"
+check "[[ \"$(field "$json" rejected)\" == true && \"$(field "$json" failurePreserved)\" == true ]]" "failed excluded launch keeps panel and recent state unchanged"
+check "[[ \"$(field "$json" accepted)\" == true && \"$(field "$json" closedAfterSuccess)\" == true && \"$(field "$json" queryClearedAfterSuccess)\" == true ]]" "successful excluded launch records, clears, and closes"
+check "[[ \"$(field "$json" savedRecentFirst)\" == 'Zoom (Web).desktop' ]]" "successful spaced desktop ID is recorded"
+
 exit "$((failures > 0))"

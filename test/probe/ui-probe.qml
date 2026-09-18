@@ -218,6 +218,25 @@ ShellRoot {
           ? String(shell.lastUpdatePayload.recentExcludedApps[0]) : "",
         refreshIntervalSec: shell.lastUpdatePayload ? shell.lastUpdatePayload.refreshIntervalSec : 0
       })
+    } else if (scenario === "launch-result") {
+      var launchPanel = widget._probePanelItem
+      service.installed = true
+      service.daemonRunning = true
+      launchPanel.open()
+      launchPanel.appQuery = "keep"
+      var rejected = launchPanel.launchExcludedApp("../bad.desktop") === false
+      var failurePreserved = launchPanel.opened && launchPanel.appQuery === "keep"
+        && shell.lastUpdateId === ""
+      var accepted = launchPanel.launchExcludedApp("Zoom (Web).desktop") === true
+      finish("", {
+        rejected: rejected,
+        failurePreserved: failurePreserved,
+        accepted: accepted,
+        closedAfterSuccess: !launchPanel.opened,
+        queryClearedAfterSuccess: launchPanel.appQuery === "",
+        savedRecentFirst: shell.lastUpdatePayload && shell.lastUpdatePayload.recentExcludedApps
+          ? String(shell.lastUpdatePayload.recentExcludedApps[0]) : ""
+      })
     } else if (scenario === "excluded-groups") {
       var excludedPanel = widget._probePanelItem
       service.installed = true

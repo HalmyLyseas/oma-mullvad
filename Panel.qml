@@ -106,6 +106,13 @@ Panel {
     appQuery = ""
   }
 
+  function launchExcludedApp(desktopId) {
+    if (service.busy || !service.launchExcludedApp(String(desktopId || ""))) return false
+    recordLaunchedApp(String(desktopId))
+    close()
+    return true
+  }
+
   function toggleFavorite(location) {
     var normalized = normalizedLocation(location)
     if (!normalized || !normalized.countryCode || !normalized.cityCode) return
@@ -1594,10 +1601,8 @@ Panel {
     Keys.onSpacePressed: launchExcluded()
 
     function launchExcluded() {
-      if (service.busy || !app || !app.id) return
-      service.launchExcludedApp(String(app.id))
-      root.recordLaunchedApp(String(app.id))
-      root.close()
+      if (!app || !app.id) return
+      root.launchExcludedApp(String(app.id))
     }
 
     RowLayout {

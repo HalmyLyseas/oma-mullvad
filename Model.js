@@ -848,7 +848,8 @@ function argv(action, params) {
     case "excludedPidDelete": return ["mullvad", "split-tunnel", "delete", pidArg(params.pid)];
     case "launchExcluded": {
         var desktopId = safeArg(params.desktopId, "desktop application ID");
-        if (!/^[a-z0-9_.+\-]+(?:\.desktop)?$/i.test(desktopId))
+        if (desktopId === "." || desktopId === ".."
+                || !/^[a-z0-9_.+() -]+(?:\.desktop)?$/i.test(desktopId))
             throw new Error("Invalid desktop application ID");
         return ["mullvad-exclude", "uwsm-app", "--", "gtk-launch", desktopId];
     }

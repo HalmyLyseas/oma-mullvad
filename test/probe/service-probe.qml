@@ -8,6 +8,8 @@ ShellRoot {
   property int elapsed: 0
   property bool finished: false
   property bool removedRefreshStarted: false
+  property bool launchRejected: false
+  property bool launchAccepted: false
   property string scenario: Quickshell.env("MULLVAD_PROBE_SCENARIO")
   property var observedStates: []
   property string lastObservedState: ""
@@ -59,6 +61,11 @@ ShellRoot {
         } else if (root.scenario === "status-race") {
           raceTrigger.command = ["touch", Quickshell.env("MULLVAD_MOCK_STATUS_DELAY_TRIGGER")]
           raceTrigger.running = true
+        } else if (root.scenario === "launch-result") {
+          root.service.installed = true
+          root.launchRejected = root.service.launchExcludedApp("../bad.desktop") === false
+          root.launchAccepted = root.service.launchExcludedApp("Zoom (Web).desktop") === true
+          root.finish("")
         } else root.finish("")
       } else if (root.elapsed > 10000) root.finish("read queue did not drain")
     }
@@ -147,6 +154,8 @@ ShellRoot {
       finalConnected: service.connected,
       scenario: root.scenario,
       removedRefreshStarted: root.removedRefreshStarted,
+      launchRejected: root.launchRejected,
+      launchAccepted: root.launchAccepted,
       note: note
     }))
     Qt.quit()

@@ -100,4 +100,8 @@ json="$(run_case race ok status-race)"
 check "[[ \"$(field "$json" finalState)\" == connected && \"$(field "$json" finalConnected)\" == true ]]" "stale delayed poll cannot overwrite a newer listener event"
 check_orphans race
 
+json="$(run_case launch ok launch-result)"
+check "[[ \"$(field "$json" launchRejected)\" == true && \"$(field "$json" launchAccepted)\" == true ]]" "excluded launch reports rejection and dispatch success"
+check_orphans launch
+
 exit "$((failures > 0))"
