@@ -42,6 +42,7 @@ run_case() {
   [[ "$scenario" == status-race ]] && listen_script="$plugin_dir/test/fixtures/listen-race.txt"
   mkdir -p "$path_dir"
   ln -s "$plugin_dir/test/mocks/mullvad" "$path_dir/mullvad"
+  ln -s "$plugin_dir/test/mocks/mullvad-exclude" "$path_dir/mullvad-exclude"
   ln -s "$plugin_dir/test/mocks/ps" "$path_dir/ps"
   : > "$scratch/$name.mock"
   MULLVAD_MOCK_MODE="$mode" MULLVAD_MOCK_LOG="$scratch/$name.mock" \
@@ -120,6 +121,7 @@ check_orphans race
 
 json="$(run_case launch ok launch-result)"
 check_json "$json" "excluded launch reports rejection and dispatch success" launchRejected eq true launchAccepted eq true
+check_command "excluded launch stays inside the mock boundary" grep -Fq 'mullvad-exclude <uwsm-app> <--> <gtk-launch> <Zoom (Web).desktop>' "$scratch/launch.mock"
 check_orphans launch
 
 exit "$((failures > 0))"

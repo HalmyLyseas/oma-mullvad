@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+: "${MULLVAD_MOCK_LOG:?MULLVAD_MOCK_LOG is required}"
+printf 'mullvad-exclude' >> "$MULLVAD_MOCK_LOG"
+for arg in "$@"; do
+  printf ' <%s>' "$arg" >> "$MULLVAD_MOCK_LOG"
+done
+printf '\n' >> "$MULLVAD_MOCK_LOG"

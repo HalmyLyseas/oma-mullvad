@@ -16,6 +16,7 @@ fi
 mkdir -p "$scratch/qmlroot" "$scratch/bin"
 ln -s "$omarchy_shell_dir" "$scratch/qmlroot/qs"
 ln -s "$plugin_dir/test/mocks/mullvad" "$scratch/bin/mullvad"
+ln -s "$plugin_dir/test/mocks/mullvad-exclude" "$scratch/bin/mullvad-exclude"
 ln -s "$plugin_dir/test/mocks/ps" "$scratch/bin/ps"
 
 check_json() {
@@ -105,5 +106,11 @@ json="$(run_case launch-result)"
 check_json "$json" "failed excluded launch keeps panel and recent state unchanged" rejected eq true failurePreserved eq true
 check_json "$json" "successful excluded launch records, clears, and closes" accepted eq true closedAfterSuccess eq true queryClearedAfterSuccess eq true
 check_json "$json" "successful spaced desktop ID is recorded" savedRecentFirst eq 'Zoom (Web).desktop'
+if grep -Fq 'mullvad-exclude <uwsm-app> <--> <gtk-launch> <Zoom (Web).desktop>' "$scratch/launch-result.mock"; then
+  printf 'ok - excluded UI launch stays inside the mock boundary\n'
+else
+  printf 'not ok - excluded UI launch stays inside the mock boundary\n'
+  failures=$((failures + 1))
+fi
 
 exit "$((failures > 0))"
