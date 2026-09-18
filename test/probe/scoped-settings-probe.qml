@@ -5,145 +5,210 @@ import Quickshell.Io
 ShellRoot {
   id: root
   readonly property string pluginId: "io.github.kallupx.oma-mullvad"
-  property var config: null
-  property bool finished: false
-  property int writes: 0
+  readonly property string shellPath: Quickshell.env("HOME") + "/.config/omarchy/shell.json"
+  property var host: null
   property var facade: null
+  property var manifest: null
+  property var diskConfig: null
+  property int phase: 0
+  property int writes: 0
+  property bool finished: false
+  property var results: ({})
 
   FileView {
-    id: shellFile
-    path: Quickshell.env("MULLVAD_SHELL_JSON")
+    id: manifestFile
+    path: Quickshell.env("MULLVAD_PLUGIN_MANIFEST")
+    printErrors: false
+    onLoaded: {
+      try { root.manifest = JSON.parse(text()) }
+      catch (e) { root.finish("manifest parse failed") }
+    }
+    onLoadFailed: root.finish("manifest load failed")
+  }
+
+  FileView {
+    id: diskFile
+    path: root.shellPath
     watchChanges: true
     atomicWrites: true
     printErrors: false
     onLoaded: {
-      try { root.config = JSON.parse(text()) } catch (e) { root.config = null }
-      if (!root.finished) settle.restart()
+      try { root.diskConfig = JSON.parse(text()) }
+      catch (e) { root.diskConfig = null }
     }
-    onLoadFailed: root.config = null
+    onLoadFailed: root.diskConfig = null
     onFileChanged: reload()
   }
 
-  QtObject { id: serviceToken }
-
-  Component.onCompleted: {
-    var component = Qt.createComponent("file://" + Quickshell.env("OMARCHY_SHELL_DIR")
-                                       + "/services/PluginShellApi.qml")
-    if (component.status !== Component.Ready) {
-      console.log("PROBE_RESULT " + JSON.stringify({ note: component.errorString() }))
-      Qt.quit()
-      return
+  Process {
+    id: removeConfig
+    command: ["rm", "--", root.shellPath]
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root.finish("isolated config removal failed")
+      else { root.phase = 4; root.diskConfig = null; settle.restart() }
     }
-    facade = component.createObject(root, {
-      pluginId: pluginId,
-      _serviceLookup: function(id) { return id === root.pluginId ? serviceToken : null },
-      _updateSettings: function(id, settings) { return root.updateSettings(id, settings) }
-    })
   }
 
-  function currentEntry() {
+  Component.onCompleted: {
+    var component = Qt.createComponent("file://" + Quickshell.env("OMARCHY_SHELL_DIR") + "/shell.qml")
+    if (component.status !== Component.Ready) {
+      finish(component.errorString())
+      return
+    }
+    host = component.createObject(null)
+    if (!host) finish("host creation failed")
+    else settle.start()
+  }
+
+  function entry(config) {
     if (!config || config.version !== 1 || !config.bar || !config.bar.layout) return null
     var sections = ["left", "center", "right"]
     for (var s = 0; s < sections.length; s++) {
       var rows = config.bar.layout[sections[s]] || []
-      for (var i = 0; i < rows.length; i++) if (rows[i] && rows[i].id === pluginId) return rows[i]
+      for (var i = 0; i < rows.length; i++)
+        if (rows[i] && rows[i].id === pluginId) return rows[i]
     }
     return null
   }
 
-  function updateSettings(id, settings) {
-    if (id !== pluginId || !config || config.version !== 1) return false
-    var entry = currentEntry()
-    if (!entry) return false
-    var next = JSON.parse(JSON.stringify(config))
-    var rows = next.bar.layout.right || []
-    var replaced = false
-    for (var i = 0; i < rows.length; i++) if (rows[i] && rows[i].id === pluginId) {
-      rows[i] = JSON.parse(JSON.stringify(settings))
-      rows[i].id = pluginId
-      replaced = true
-    }
-    if (!replaced) return false
-    config = next
-    shellFile.setText(JSON.stringify(next, null, 2) + "\n")
+  function clone(value) { return JSON.parse(JSON.stringify(value)) }
+
+  function writeConfig(value) {
+    diskFile.setText(JSON.stringify(value, null, 2) + "\n")
     writes++
-    return true
+  }
+
+  function withCollections(source, changes) {
+    var next = clone(source)
+    for (var key in changes) next[key] = changes[key]
+    return next
   }
 
   Timer {
     id: settle
-    interval: 80
-    onTriggered: root.runProbe()
+    interval: 100
+    onTriggered: root.advance()
   }
 
-  function runProbe() {
-    if (finished || !facade || !currentEntry()) return
-    var initial = currentEntry()
-    var initialFavorites = (initial.favoriteLocations || []).length
-    var initialRecents = (initial.recentLocations || []).length
-    var initialApps = (initial.recentExcludedApps || []).length
-    var foreignRejected = facade.updateEntryInline("foreign.plugin", {}) === false
-    var ownService = facade.serviceFor(pluginId) === serviceToken
-    var foreignService = facade.serviceFor("foreign.plugin") === null
+  function advance() {
+    if (finished || !host || !manifest) { if (!finished) settle.restart(); return }
+    var hostEntry = entry(host.shellConfig)
+    var diskEntry = entry(diskConfig)
 
-    var saved = facade.updateEntryInline(pluginId, {
-      id: pluginId, refreshIntervalSec: 45, siblingValue: "preserved",
-      favoriteLocations: initial.favoriteLocations,
-      recentLocations: [{ countryCode: "fi", cityCode: "hel", country: "Finland", city: "Helsinki" }],
-      recentExcludedApps: initial.recentExcludedApps
-    })
-    var siblingPreserved = currentEntry().siblingValue === "preserved"
-
-    shellFile.setText("{ invalid\n")
-    config = null
-    var invalidRejected = facade.updateEntryInline(pluginId, { id: pluginId }) === false
-    shellFile.setText("")
-    config = null
-    var deletedRejected = facade.updateEntryInline(pluginId, { id: pluginId }) === false
-
-    var recreated = {
-      version: 1,
-      bar: { layout: { left: [], center: [], right: [{
-        id: pluginId, refreshIntervalSec: 60, siblingValue: "recreated",
-        favoriteLocations: [], recentLocations: [], recentExcludedApps: []
-      }] } }, plugins: []
+    if (phase === 0) {
+      var installed = host.pluginRegistry && host.pluginRegistry.installedPlugins
+        ? host.pluginRegistry.installedPlugins[pluginId] : null
+      if (!installed || !hostEntry || !diskEntry) { settle.restart(); return }
+      facade = host.pluginShellFor(manifest)
+      if (!facade) { finish("host did not create scoped facade"); return }
+      results.initialFavorites = (hostEntry.favoriteLocations || []).length
+      results.initialRecents = (hostEntry.recentLocations || []).length
+      results.initialApps = (hostEntry.recentExcludedApps || []).length
+      results.foreignRejected = facade.updateEntryInline("foreign.plugin", {}) === false
+      results.saved = facade.updateEntryInline(pluginId, withCollections(hostEntry, {
+        recentLocations: [{ countryCode: "fi", cityCode: "hel", country: "Finland", city: "Helsinki" }]
+      }))
+      phase = 1
+      settle.restart()
+      return
     }
-    config = recreated
-    shellFile.setText(JSON.stringify(recreated, null, 2) + "\n")
-    var recreatedSaved = facade.updateEntryInline(pluginId, {
-      id: pluginId, refreshIntervalSec: 60, siblingValue: "recreated",
-      favoriteLocations: [], recentLocations: [], recentExcludedApps: ["org.example.Safe.desktop"]
-    })
 
-    var replacementComponent = Qt.createComponent("file://" + Quickshell.env("OMARCHY_SHELL_DIR")
-                                                   + "/services/PluginShellApi.qml")
-    var replacement = replacementComponent.createObject(root, {
-      pluginId: pluginId,
-      _serviceLookup: function(id) { return id === root.pluginId ? serviceToken : null },
-      _updateSettings: function(id, settings) { return root.updateSettings(id, settings) }
-    })
-    var replacementWorks = replacement && replacement.serviceFor(pluginId) === serviceToken
-    if (replacement) replacement.destroy()
+    if (phase === 1) {
+      if (!diskEntry || diskEntry.refreshIntervalSec !== 30
+          || (diskEntry.recentLocations || []).length !== 1
+          || diskEntry.recentLocations[0].cityCode !== "hel") { settle.restart(); return }
+      results.siblingPreserved = diskEntry.siblingValue === "preserved"
+      writeConfig(withCollections(diskConfig, { externalMarker: "fresh" }))
+      phase = 2
+      settle.restart()
+      return
+    }
 
+    if (phase === 2) {
+      if (!host.shellConfig || host.shellConfig.externalMarker !== "fresh") { settle.restart(); return }
+      var fresh = entry(host.shellConfig)
+      results.externalEditObserved = !!fresh
+      results.externalMergeSaved = facade.updateEntryInline(pluginId, withCollections(fresh, {
+        favoriteLocations: [{ countryCode: "de", cityCode: "ber", country: "Germany", city: "Berlin" }]
+      }))
+      phase = 3
+      settle.restart()
+      return
+    }
+
+    if (phase === 3) {
+      if (!diskEntry || (diskEntry.favoriteLocations || []).length !== 1) { settle.restart(); return }
+      results.externalSiblingPreserved = diskConfig.externalMarker === "fresh"
+      diskFile.setText("{ invalid\n")
+      writes++
+      phase = 31
+      settle.restart()
+      return
+    }
+
+    if (phase === 31) {
+      if (entry(host.shellConfig)) { settle.restart(); return }
+      facade = host.pluginShellFor(manifest)
+      if (!facade) { finish("host did not recreate invalid-state facade"); return }
+      results.invalidRejected = facade.updateEntryInline(pluginId, { id: pluginId }) === false
+      removeConfig.running = true
+      return
+    }
+
+    if (phase === 4) {
+      if (entry(host.shellConfig)) { settle.restart(); return }
+      facade = host.pluginShellFor(manifest)
+      if (!facade) { finish("host did not recreate deleted-state facade"); return }
+      results.deletedRejected = facade.updateEntryInline(pluginId, { id: pluginId }) === false
+      var recreated = {
+        version: 1,
+        bar: { layout: { left: [], center: [], right: [{
+          id: pluginId, refreshIntervalSec: 60, siblingValue: "recreated",
+          favoriteLocations: [], recentLocations: [], recentExcludedApps: []
+        }] } }, plugins: []
+      }
+      writeConfig(recreated)
+      phase = 5
+      settle.restart()
+      return
+    }
+
+    if (phase === 5) {
+      if (!hostEntry || hostEntry.siblingValue !== "recreated") { settle.restart(); return }
+      facade = host.pluginShellFor(manifest)
+      if (!facade) { finish("host did not recreate restored facade"); return }
+      results.recreatedObserved = true
+      results.recreatedSaved = facade.updateEntryInline(pluginId, withCollections(hostEntry, {
+        recentExcludedApps: ["org.example.Safe.desktop"]
+      }))
+      phase = 6
+      settle.restart()
+      return
+    }
+
+    if (phase === 6) {
+      if (!diskEntry || (diskEntry.recentExcludedApps || []).length !== 1) { settle.restart(); return }
+      var replacement = host.pluginShellFor(manifest)
+      results.facadeRecreated = replacement && replacement.updateEntryInline("foreign.plugin", {}) === false
+      results.finalApps = diskEntry.recentExcludedApps.length
+      results.writes = writes
+      finish("", results)
+    }
+  }
+
+  function finish(note, values) {
+    if (finished) return
     finished = true
-    console.log("PROBE_RESULT " + JSON.stringify({
-      note: "", initialFavorites: initialFavorites, initialRecents: initialRecents,
-      initialApps: initialApps, foreignRejected: foreignRejected,
-      ownService: ownService, foreignService: foreignService,
-      saved: saved, siblingPreserved: siblingPreserved,
-      invalidRejected: invalidRejected, deletedRejected: deletedRejected,
-      recreatedSaved: recreatedSaved, replacementWorks: replacementWorks,
-      finalApps: (currentEntry().recentExcludedApps || []).length, writes: writes
-    }))
+    var result = { note: note }
+    for (var key in (values || {})) result[key] = values[key]
+    console.log("PROBE_RESULT " + JSON.stringify(result))
+    if (host) host.destroy()
     Qt.quit()
   }
 
   Timer {
-    interval: 5000
+    interval: 12000
     running: true
-    onTriggered: {
-      console.log("PROBE_RESULT " + JSON.stringify({ note: "overall timeout" }))
-      Qt.quit()
-    }
+    onTriggered: root.finish("overall timeout")
   }
 }
