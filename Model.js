@@ -65,7 +65,9 @@ function isCliVersionSupported(version) {
 
 function parseDaemonVersion(raw) {
     var input = boundedInput(raw, 4096);
-    var version = input.match(/^\s*Current version\s*:\s*(.+?)\s*$/im);
+    var daemonVersion = input.match(/^\s*mullvad-daemon version\s*:\s*(.+?)\s*$/im);
+    var currentVersion = input.match(/^\s*Current version\s*:\s*(.+?)\s*$/im);
+    var version = daemonVersion || currentVersion;
     var supported = input.match(/^\s*(?:Is )?Supported\s*:\s*(\S+)/im);
     var upgrade = input.match(/^\s*Suggested upgrade\s*:\s*(.+?)\s*$/im);
     var upgradeValue = upgrade ? plainText(upgrade[1], 64) : "";

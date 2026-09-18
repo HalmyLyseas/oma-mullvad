@@ -36,6 +36,13 @@ test("diagnostic parsers return bounded plain text", () => {
     assert.equal(daemon.version, "2026.4");
     assert.equal(daemon.supported, true);
 
+    const skewedDaemon = Model.parseDaemonVersion([
+        "Current version: 2026.4",
+        "mullvad-daemon version: 2026.5",
+        "Supported: yes"
+    ].join("\n"));
+    assert.equal(skewedDaemon.version, "2026.5");
+
     const packages = Model.parsePackageInfo([
         "mullvad-vpn\t2026.4-1\tMullvad <b>VPN</b>\t2026-09-01 12:00",
         "mullvad-vpn-daemon\t" + "9".repeat(1000) + "\tDaemon\tunknown",
