@@ -32,6 +32,7 @@ Panel {
   readonly property bool cliReady: service.installed && service.daemonRunning
   readonly property var _probePageItem: pageLoader.item
   readonly property var _probeConfirmDialog: confirmDialog
+  readonly property var _probeKeyCatcher: keyCatcher
   property var _probeFirstLocationRow: null
   readonly property string appEmptyText: "No installed applications match your search."
 

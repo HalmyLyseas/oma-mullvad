@@ -38,6 +38,10 @@ if [[ "$mode" == partial-batch && "$*" == "split-tunnel delete 1234" ]]; then
   echo "mock partial batch failure" >&2
   exit 9
 fi
+if [[ "$mode" == ui-reject && "$*" == "anti-censorship set mode off" ]]; then
+  echo "mock advanced rejection" >&2
+  exit 9
+fi
 
 if [[ "${1:-}" == account && "${2:-}" == login ]]; then
   IFS= read -r line || line=""

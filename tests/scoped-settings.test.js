@@ -14,6 +14,13 @@ test("scoped settings probe uses the real host facade and isolated shell.json", 
     assert.match(runner, /collect-result/);
     assert.match(probe, /OMARCHY_SHELL_DIR[\s\S]*shell\.qml/);
     assert.match(probe, /pluginShellFor/);
+    assert.match(probe, /ensureService\(pluginId\)/);
+    assert.match(probe, /pluginWidgetComponents\[pluginId\]/);
+    assert.match(probe, /component\.createObject/);
+    assert.match(probe, /_probePanelItem/);
+    assert.match(probe, /actualProductComponent/);
+    assert.match(probe, /stalePanelPreservedFreshFields/);
+    assert.match(probe, /recoveredPanelState/);
     assert.match(probe, /FileView/);
     assert.doesNotMatch(probe, /services\/PluginShellApi\.qml|_updateSettings|function updateSettings|MULLVAD_SHELL_JSON/);
 });

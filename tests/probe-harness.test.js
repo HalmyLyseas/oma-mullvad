@@ -18,7 +18,7 @@ function collect(log, status = 0) {
 }
 
 test("probe result collector accepts one prefixed Quickshell result", () => {
-    const result = collect('INFO: PROBE_RESULT {"note":"","passed":true}\n');
+    const result = collect('\u001b[32m DEBUG qml:\u001b[0m PROBE_RESULT {"note":"","passed":true}\n');
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), { note: "", passed: true });
 });
@@ -45,6 +45,7 @@ for (const [name, log, status] of [
     ["late missing QML module", 'PROBE_RESULT {"note":"","passed":true}\nfile:///tmp/Late.qml:1:1: module "Missing.Module" is not installed\n', 0],
     ["late missing versioned QML module", 'PROBE_RESULT {"note":"","passed":true}\nfile:///tmp/Late.qml:1:1: module "Missing.Module" version 1.0 is not installed\n', 0],
     ["late unavailable QML type", 'PROBE_RESULT {"note":"","passed":true}\nType MissingWidget unavailable\n', 0],
+    ["late scene TypeError", 'PROBE_RESULT {"note":"","passed":true}\nWARN scene: @probe.qml[7:-1]: TypeError: late failure\n', 0],
     ["duplicate result", 'PROBE_RESULT {"note":"","passed":true}\nPROBE_RESULT {"note":"","passed":true}\n', 0]
 ]) {
     test(`probe result collector rejects ${name}`, () => {

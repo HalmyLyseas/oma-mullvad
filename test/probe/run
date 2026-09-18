@@ -1,16 +1,21 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+trusted_system_path=/usr/bin:/bin
+PATH="$trusted_system_path"
 probe_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin_dir="$(cd "$probe_dir/../.." && pwd)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 failures=0
 
-if ! command -v qs >/dev/null 2>&1; then
+qs_bin="$(PATH="$trusted_system_path" command -v qs || true)"
+timeout_bin="$(PATH="$trusted_system_path" command -v timeout || true)"
+if [[ -z "$qs_bin" ]]; then
   echo "mock Process probe skipped: qs is unavailable"
   exit 0
 fi
+[[ -n "$timeout_bin" ]] || { echo "mock Process probe requires timeout" >&2; exit 1; }
 
 check_json() {
   local json="$1" label="$2"
@@ -47,6 +52,13 @@ run_case() {
   ln -s "$plugin_dir/test/mocks/pgrep" "$path_dir/pgrep"
   ln -s "$plugin_dir/test/mocks/checkupdates" "$path_dir/checkupdates"
   ln -s "$plugin_dir/test/mocks/touch" "$path_dir/touch"
+  for executable in bash dirname readlink sleep head tr cat rm awk date mktemp setsid timeout; do
+    local helper
+    helper="$(PATH="$trusted_system_path" command -v "$executable" || true)"
+    [[ -n "$helper" ]] || { echo "required isolated helper missing: $executable" >&2; return 1; }
+    ln -s "$helper" "$path_dir/$executable"
+    [[ "$(readlink -f "$path_dir/$executable")" == "$(readlink -f "$helper")" ]] || return 1
+  done
   for executable in mullvad mullvad-exclude ps pgrep checkupdates touch; do
     local resolved
     resolved="$(PATH="$path_dir" command -v "$executable")" || {
@@ -67,11 +79,11 @@ run_case() {
     MULLVAD_MOCK_TOUCH_TARGET="$scratch/$name.availability-trigger" \
     MULLVAD_PACMAN_LOCAL_DB="$plugin_dir/test/fixtures/pacman-local" \
     MULLVAD_PROBE_SCENARIO="$scenario" MULLVAD_PLUGIN_DIR="$plugin_dir" \
-    PATH="$path_dir:$PATH" timeout 20 qs -n -p "$probe_dir/service-probe.qml" \
+    PATH="$path_dir" "$timeout_bin" 20 "$qs_bin" -n -p "$probe_dir/service-probe.qml" \
     > "$scratch/$name.log" 2>&1
   local command_status=$?
   "$probe_dir/collect-result" "$scratch/$name.log" "$command_status" "$scratch/$name.mock" || {
-    cat "$scratch/$name.log" >&2
+    head -c 65536 "$scratch/$name.log" >&2
     return 1
   }
 }

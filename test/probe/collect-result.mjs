@@ -47,12 +47,13 @@ if (mockLogPath) {
         process.exit(1);
     }
 }
-const logPrefix = /^\s*(?:(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|CRITICAL|FATAL):\s*)?/;
+const logPrefix = /^\s*(?:(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|CRITICAL|FATAL)(?: [A-Za-z0-9_.-]+)?:\s*)?/;
 function isEngineError(line) {
-    const text = line.replace(logPrefix, "");
-    return /^(?:TypeError:|ReferenceError:|QQmlApplicationEngine failed to load component|QQmlComponent: Component is not ready)(?:\s|$)/.test(text)
-        || /^(?:(?:file|qrc|resource):\/\/\/[^\r\n]*?:\d+(?::\d+)?:\s*)?module\s+["'][^"']+["']\s+(?:version\s+\S+\s+)?is not installed(?:\s|$)/.test(text)
-        || /^(?:(?:file|qrc|resource):\/\/\/[^\r\n]*?:\d+(?::\d+)?:\s*)?Type\s+[A-Za-z_][A-Za-z0-9_.]*\s+unavailable\s*$/.test(text);
+    const text = line.replace(/\x1b\[[0-9;]*m/g, "").replace(logPrefix, "");
+    const sourcePrefix = "(?:(?:@[^:]+\\[[^\\]]+\\]|(?:file|qrc|resource):\\/\\/\\/[^\\r\\n]*?:\\d+(?::\\d+)?):\\s*)?";
+    return new RegExp("^" + sourcePrefix + "(?:TypeError:|ReferenceError:|QQmlApplicationEngine failed to load component|QQmlComponent: Component is not ready)(?:\\s|$)").test(text)
+        || new RegExp("^" + sourcePrefix + "module\\s+[\\\"'][^\\\"']+[\\\"']\\s+(?:version\\s+\\S+\\s+)?is not installed(?:\\s|$)").test(text)
+        || new RegExp("^" + sourcePrefix + "Type\\s+[A-Za-z_][A-Za-z0-9_.]*\\s+unavailable\\s*$").test(text);
 }
 if (status !== 0) {
     console.error(`probe process exited with status ${status}`);
@@ -64,7 +65,8 @@ if (log.split(/\r?\n/).some(isEngineError)) {
 }
 
 const lines = log.split(/\r?\n/).map(line => {
-    const match = line.match(/^\s*(?:(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|CRITICAL|FATAL):\s*)?PROBE_RESULT (.*)$/);
+    const clean = line.replace(/\x1b\[[0-9;]*m/g, "");
+    const match = clean.match(/^\s*(?:(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|CRITICAL|FATAL)(?: qml)?:\s*)?PROBE_RESULT (.*)$/);
     return match ? match[1] : null;
 }).filter(value => value !== null);
 if (lines.length !== 1) {

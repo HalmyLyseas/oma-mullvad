@@ -55,6 +55,26 @@ Item {
   function open() { popup.open() }
   function close() { popup.close() }
   function toggle() { popup.opened ? popup.close() : popup.open() }
+  function focusTrigger() { trigger.forceActiveFocus() }
+  function handleTriggerKey(key) {
+    if (key === Qt.Key_Return || key === Qt.Key_Enter || key === Qt.Key_Space || key === Qt.Key_Down) {
+      toggle(); return true
+    }
+    if (key === Qt.Key_Escape && popup.opened) { close(); return true }
+    return false
+  }
+  function handleSearchKey(key) {
+    if (key === Qt.Key_Escape) { close(); return true }
+    if (key === Qt.Key_Down) {
+      if (resultList.count > 0) { resultList.currentIndex = 0; resultList.forceActiveFocus() }
+      return true
+    }
+    if (key === Qt.Key_Return || key === Qt.Key_Enter) {
+      if (resultList.count > 0) { resultList.currentIndex = 0; resultList.selectCurrent() }
+      return true
+    }
+    return false
+  }
 
   signal changed(string value)
   signal selectionChanged(var values)
@@ -142,13 +162,7 @@ Item {
       }
 
       Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-            || event.key === Qt.Key_Space || event.key === Qt.Key_Down) {
-          popup.opened ? popup.close() : popup.open()
-          event.accepted = true
-        } else if (event.key === Qt.Key_Escape && popup.opened) {
-          popup.close(); event.accepted = true
-        }
+        if (root.handleTriggerKey(event.key)) event.accepted = true
       }
 
       Text {
@@ -239,21 +253,7 @@ Item {
               }
 
               Keys.onPressed: function(event) {
-                if (event.key === Qt.Key_Escape) {
-                  popup.close(); event.accepted = true
-                } else if (event.key === Qt.Key_Down) {
-                  if (resultList.count > 0) {
-                    resultList.currentIndex = 0
-                    resultList.forceActiveFocus()
-                  }
-                  event.accepted = true
-                } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-                  if (resultList.count > 0) {
-                    resultList.currentIndex = 0
-                    resultList.selectCurrent()
-                  }
-                  event.accepted = true
-                }
+                if (root.handleSearchKey(event.key)) event.accepted = true
               }
             }
           }

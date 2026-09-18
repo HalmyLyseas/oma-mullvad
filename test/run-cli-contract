@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+trusted_system_path=/usr/bin:/bin
+PATH="$trusted_system_path"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
-node_bin="$(command -v node)" || exit 1
+node_bin="$(PATH="$trusted_system_path" command -v node)" || exit 1
 mkdir -p "$scratch/bin"
 for executable in bash dirname readlink cat awk; do
-  helper="$(command -v "$executable")" || exit 1
+  helper="$(PATH="$trusted_system_path" command -v "$executable")" || exit 1
   ln -s "$helper" "$scratch/bin/$executable" || exit 1
 done
 ln -s "$root/test/mocks/mullvad" "$scratch/bin/mullvad" || exit 1

@@ -12,6 +12,8 @@ ShellRoot {
   property var originalService: null
   property var interactionValues: null
   property int interactionPhase: 0
+  property var advancedControl: null
+
 
   QtObject {
     id: shell
@@ -255,80 +257,76 @@ ShellRoot {
       var controlsPanel = widget._probePanelItem
       service.installed = true
       service.daemonRunning = true
-      service.locations = [{
-        countryCode: "se", cityCode: "got", country: "Sweden", city: "Gothenburg",
-        latitude: 57.7, longitude: 11.9,
-        servers: [{ hostname: "se-got-wg-001", provider: "Example", ownership: "owned",
-                    ipv4: "192.0.2.1", ipv6: "2001:db8::1", active: true }]
-      }]
+      service.locations = [
+        { countryCode: "se", cityCode: "got", country: "Sweden", city: "Gothenburg",
+          latitude: 57.7, longitude: 11.9,
+          servers: [{ hostname: "se-got-wg-001", provider: "Example", ownership: "owned", active: true }] },
+        { countryCode: "de", cityCode: "ber", country: "Germany", city: "Berlin",
+          latitude: 52.5, longitude: 13.4,
+          servers: [{ hostname: "de-ber-wg-001", provider: "Example", ownership: "owned", active: true }] }
+      ]
       service.relayConstraints = {
         location: { type: "city", countryCode: "se", cityCode: "got" },
         providers: [], ownership: "any", ipVersion: "any", multihop: false, entry: {}
       }
-      controlsPanel.handleTextKey("2")
-      var locations = controlsPanel.locationOptions()
-      var servers = controlsPanel.serverOptions(service.locations[0])
-      controlsPanel.toggleFavorite(service.locations[0])
-      controlsPanel.recordRecent(service.locations[0])
-      controlsPanel.handleTextKey("3")
-      var tabsWorked = controlsPanel.pageIndex === 2 && controlsPanel._probePageItem !== null
-
-      var accountRan = false
-      controlsPanel.confirmAction("Account action?", function() { accountRan = true })
-      controlsPanel._probeConfirmDialog.canceled()
-      var removalRan = false
-      controlsPanel.confirmAction("Removal action?", function() { removalRan = true })
-      controlsPanel._probeConfirmDialog.canceled()
-
-      var dropdownComponent = Qt.createComponent("file://" + root.pluginDir + "/OmaDropdown.qml")
-      var dropdown = dropdownComponent.createObject(root, {
-        options: [{ value: "got", label: "Gothenburg" }], value: "got"
-      })
-      var searchableComponent = Qt.createComponent("file://" + root.pluginDir + "/OmaSearchableDropdown.qml")
-      var searchable = searchableComponent.createObject(root, {
-        options: [{ value: "se", label: "Sweden", description: "Gothenburg Example" }], value: "se"
-      })
-      var mapComponent = Qt.createComponent("file://" + root.pluginDir + "/WorldMap.qml")
-      var map = mapComponent.createObject(root, { width: 360, height: 180 })
-
-      var dropdownChanged = ""
-      if (dropdown) {
-        dropdown.changed.connect(function(value) { dropdownChanged = value })
-        dropdown.open()
-        dropdown.close()
-        dropdown.changed("got")
-      }
-      var searchableChanged = ""
-      if (searchable) {
+      Qt.callLater(function() {
+        controlsPanel.handleTextKey("2")
+        var tabsWorked = controlsPanel.pageIndex === 1 && controlsPanel._probePageItem !== null
+        var visualParent = controlsPanel._probePageItem
+        var dropdownComponent = Qt.createComponent("file://" + root.pluginDir + "/OmaDropdown.qml")
+        var dropdown = dropdownComponent.createObject(visualParent, {
+          x: 0, y: 0, width: 320, options: [
+            { value: "se", label: "Sweden" }, { value: "ber", label: "Berlin" }
+          ], value: "se"
+        })
+        var searchableComponent = Qt.createComponent("file://" + root.pluginDir + "/OmaSearchableDropdown.qml")
+        var searchable = searchableComponent.createObject(visualParent, {
+          x: 0, y: 70, width: 320, options: [
+            { value: "se", label: "Sweden" }, { value: "de", label: "Germany" }
+          ], value: ""
+        })
+        var mapComponent = Qt.createComponent("file://" + root.pluginDir + "/WorldMap.qml")
+        var map = mapComponent.createObject(visualParent, {
+          x: 0, y: 140, width: 360, height: 180, locations: service.locations,
+          selectedPoint: service.locations[1]
+        })
+        var dropdownChanged = ""
+        dropdown.changed.connect(function(value) {
+          dropdownChanged = value
+          if (value === "ber") controlsPanel.chooseLocation(service.locations[1], false)
+        })
+        dropdown.focusTrigger()
+        dropdown.handleTriggerKey(Qt.Key_Space)
+        dropdown.handlePopupKey(Qt.Key_Down, "")
+        dropdown.handlePopupKey(Qt.Key_Return, "")
+        var searchableChanged = ""
         searchable.changed.connect(function(value) { searchableChanged = value })
-        searchable.open()
-        searchable.close()
-        searchable.changed("se")
-      }
+        searchable.focusTrigger()
+        searchable.handleTriggerKey(Qt.Key_Space)
+        searchable.handleSearchKey(Qt.Key_Return)
 
-      controlsPanel.handleTextKey("1")
-      controlsPanel.handleTextKey("t")
-      var busyBlocks = controlsPanel.chooseLocation(service.locations[0], false) === false
-      interactionPhase = 0
-      interactionValues = {
-        tabsWorked: tabsWorked, locationCount: locations.length, serverCount: servers.length,
-        favoriteCount: controlsPanel.favoriteLocations.length,
-        recentCount: controlsPanel.recentLocations.length,
-        mapProjection: map && map.pointX(service.locations[0]) > 0 && map.pointY(service.locations[0]) > 0,
-        advancedPageLoaded: tabsWorked,
-        dropdownLabel: dropdown ? dropdown.currentLabel() : "",
-        searchableLabel: searchable ? searchable.currentLabel() : "",
-        dropdownChanged: dropdownChanged,
-        searchableChanged: searchableChanged,
-        confirmationClosed: !controlsPanel._probeConfirmDialog.opened,
-        busyBlocksLocation: busyBlocks,
-        accountCanceled: !accountRan,
-        removalCanceled: !removalRan
-      }
-      if (dropdown) dropdown.destroy()
-      if (searchable) searchable.destroy()
-      if (map) map.destroy()
-      interactionWait.start()
+        var accountRan = false
+        controlsPanel.confirmAction("Account action?", function() { accountRan = true })
+        controlsPanel._probeConfirmDialog.handleKey({ key: Qt.Key_Escape })
+        var confirmationRan = false
+        controlsPanel.confirmAction("Accept action?", function() { confirmationRan = true })
+        controlsPanel._probeConfirmDialog.selectedIndex = 1
+        controlsPanel._probeConfirmDialog.handleKey({ key: Qt.Key_Return })
+
+        root.interactionValues = {
+          tabsWorked: tabsWorked,
+          dropdownChanged: dropdownChanged,
+          searchableChanged: searchableChanged,
+          locationSelected: service.relayConstraints.location.cityCode === "ber",
+          mapProjection: map && map.visible && map.pointX(service.locations[1]) > 0 && map.pointY(service.locations[1]) > 0,
+          confirmationClosed: !controlsPanel._probeConfirmDialog.opened,
+          accountCanceled: !accountRan,
+          confirmationAccepted: confirmationRan,
+          physicalInputAvailable: false
+        }
+        root.interactionPhase = 0
+        interactionWait.start()
+      })
     } else if (scenario === "excluded-groups") {
       var excludedPanel = widget._probePanelItem
       service.installed = true
@@ -357,18 +355,56 @@ ShellRoot {
     onTriggered: {
       elapsed += interval
       if (!root.service.busy && root.service._readQueue.length === 0 && root.service._readKind === "") {
+        var panel = root.widget._probePanelItem
         if (root.interactionPhase === 0) {
           root.interactionPhase = 1
+          root.service.locations = [{
+            countryCode: "se", cityCode: "got", country: "Sweden", city: "Gothenburg",
+            latitude: 57.7, longitude: 11.9,
+            servers: [{ hostname: "se-got-wg-001", provider: "Example", ownership: "owned",
+                        ipv4: "192.0.2.1", ipv6: "2001:db8::1", active: true }]
+          }]
+          root.service.relayConstraints = {
+            location: { type: "city", countryCode: "se", cityCode: "got" },
+            providers: [], ownership: "any", ipVersion: "any", multihop: false, entry: {}
+          }
+          root.service.state = "disconnected"
+          root.service.connected = false
+          panel.handleTextKey("1")
+        } else if (root.interactionPhase === 1) {
+          root.interactionPhase = 2
+          panel.handleTextKey("t")
+        } else if (root.interactionPhase === 2) {
+          root.interactionPhase = 3
           root.service.state = "connected"
           root.service.connected = true
           root.interactionValues.connectControlRan = true
-          root.widget._probePanelItem.handleTextKey("t")
+        } else if (root.interactionPhase === 3) {
+          root.interactionPhase = 4
+          panel.handleTextKey("t")
+        } else if (root.interactionPhase === 4) {
+          root.interactionPhase = 5
+          root.interactionValues.disconnectControlRan = true
+          panel.handleTextKey("3")
+          root.interactionValues.advancedPageLoaded = panel.pageIndex === 2 && panel._probePageItem !== null
+          var component = Qt.createComponent("file://" + root.pluginDir + "/OmaDropdown.qml")
+          root.advancedControl = component.createObject(panel._probePageItem, {
+            x: 0, y: 0, width: 320,
+            options: [{ value: "auto", label: "Automatic" }, { value: "off", label: "Off" }],
+            value: "auto"
+          })
+          root.advancedControl.changed.connect(function(value) { root.service.setAntiCensorshipMode(value) })
+          root.advancedControl.focusTrigger()
+          root.advancedControl.handleTriggerKey(Qt.Key_Space)
+          root.advancedControl.handlePopupKey(Qt.Key_Down, "")
+          root.advancedControl.handlePopupKey(Qt.Key_Return, "")
         } else {
           stop()
-          root.interactionValues.disconnectControlRan = true
+          root.interactionValues.advancedRejectedTruthful = root.service.antiCensorship.mode === "auto"
+            && root.service.lastError.indexOf("mock advanced rejection") !== -1
           root.finish("", root.interactionValues)
         }
-      } else if (elapsed > 5000) root.finish("interactive controls did not drain")
+      } else if (elapsed > 8000) root.finish("interactive controls did not drain")
     }
   }
 

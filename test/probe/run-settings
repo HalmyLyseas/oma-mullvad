@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+trusted_system_path=/usr/bin:/bin
+PATH="$trusted_system_path"
 probe_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin_dir="$(cd "$probe_dir/../.." && pwd)"
 omarchy_shell_dir="${OMARCHY_SHELL_DIR:-/usr/share/omarchy/shell}"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 
-qs_bin="$(command -v qs || true)"
-timeout_bin="$(command -v timeout || true)"
+qs_bin="$(PATH="$trusted_system_path" command -v qs || true)"
+timeout_bin="$(PATH="$trusted_system_path" command -v timeout || true)"
 if [[ -z "$qs_bin" ]]; then
   echo "scoped settings probe skipped: qs is unavailable"
   exit 0
@@ -21,29 +23,38 @@ mkdir -p "$scratch/home/.config/omarchy/plugins" "$scratch/home/.cache" \
   "$scratch/qmlroot" "$scratch/empty-bin"
 ln -s "$omarchy_shell_dir" "$scratch/qmlroot/qs"
 ln -s "$plugin_dir" "$scratch/home/.config/omarchy/plugins/io.github.kallupx.oma-mullvad"
-for executable in bash dirname cat find sort mkdir rm; do
-  resolved="$(command -v "$executable" || true)"
-  [[ -n "$resolved" ]] || { echo "required isolated helper missing: $executable" >&2; exit 1; }
-  ln -s "$resolved" "$scratch/empty-bin/$executable"
+for executable in mullvad mullvad-exclude ps pgrep checkupdates touch; do
+  ln -s "$plugin_dir/test/mocks/$executable" "$scratch/empty-bin/$executable"
+  [[ "$(readlink -f "$scratch/empty-bin/$executable")" == "$(readlink -f "$plugin_dir/test/mocks/$executable")" ]] || exit 1
+done
+for executable in bash dirname readlink sleep head tr cat find sort mkdir rm awk date mktemp setsid timeout; do
+  helper="$(PATH="$trusted_system_path" command -v "$executable" || true)"
+  [[ -n "$helper" ]] || { echo "required isolated helper missing: $executable" >&2; exit 1; }
+  ln -s "$helper" "$scratch/empty-bin/$executable"
+  [[ "$(readlink -f "$scratch/empty-bin/$executable")" == "$(readlink -f "$helper")" ]] || exit 1
 done
 
 shell_json="$scratch/home/.config/omarchy/shell.json"
-printf '%s\n' '{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[{"id":"io.github.kallupx.oma-mullvad","refreshIntervalSec":30,"siblingValue":"preserved","favoriteLocations":[{"countryCode":"se","cityCode":"got","country":"Sweden","city":"Gothenburg"}],"recentLocations":[{"countryCode":"de","cityCode":"ber","country":"Germany","city":"Berlin"}],"recentExcludedApps":["org.example.Safe.desktop"]}]}},"plugins":[]}' > "$shell_json"
+printf '%s\n' '{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[{"id":"io.github.kallupx.oma-mullvad","refreshIntervalSec":30,"siblingValue":"preserved","favoriteLocations":[{"countryCode":"se","cityCode":"got","country":"Sweden","city":"Gothenburg"}],"recentLocations":[{"countryCode":"de","cityCode":"ber","country":"Germany","city":"Berlin"}],"recentExcludedApps":["org.example.Safe.desktop"]}]}},"plugins":["io.github.kallupx.oma-mullvad"]}' > "$shell_json"
 printf '%s\n' '{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[]}},"plugins":[]}' \
   > "$scratch/omarchy/config/omarchy/shell.json"
 
 log="$scratch/scoped-settings.log"
+: > "$scratch/mock.log"
 HOME="$scratch/home" XDG_CONFIG_HOME="$scratch/home/.config" \
   XDG_CACHE_HOME="$scratch/home/.cache" XDG_DATA_HOME="$scratch/home/.local/share" \
   XDG_STATE_HOME="$scratch/home/.local/state" OMARCHY_PATH="$scratch/omarchy" \
   OMARCHY_SHELL_DIR="$omarchy_shell_dir" MULLVAD_PLUGIN_MANIFEST="$plugin_dir/manifest.json" \
+  MULLVAD_MOCK_MODE=ok MULLVAD_MOCK_LOG="$scratch/mock.log" \
+  MULLVAD_PACMAN_LOCAL_DB="$plugin_dir/test/fixtures/pacman-local" \
   QML_IMPORT_PATH="$scratch/qmlroot" PATH="$scratch/empty-bin" \
   "$timeout_bin" 20 "$qs_bin" -n -p "$probe_dir/scoped-settings-probe.qml" > "$log" 2>&1
 command_status=$?
-json="$("$probe_dir/collect-result" "$log" "$command_status")" || { cat "$log" >&2; exit 1; }
+json="$("$probe_dir/collect-result" "$log" "$command_status" "$scratch/mock.log")" || { head -c 65536 "$log" >&2; exit 1; }
 node "$probe_dir/json-assert.mjs" "$json" \
-  note empty ignored initialFavorites eq 1 initialRecents eq 1 initialApps eq 1 \
-  foreignRejected eq true saved eq true siblingPreserved eq true \
-  externalEditObserved eq true externalMergeSaved eq true externalSiblingPreserved eq true \
-  invalidRejected eq true deletedRejected eq true recreatedObserved eq true \
-  recreatedSaved eq true facadeRecreated eq true finalApps eq 1 writes eq 3
+  note empty ignored actualProductComponent eq true serviceIsHostSingleton eq true \
+  panelServiceMatches eq true initialFavorites eq 1 initialRecents eq 1 initialApps eq 1 \
+  foreignRejected eq true siblingPreserved eq true externalEditObserved eq true \
+  recreatedUiState eq true stalePanelPreservedFreshFields eq true \
+  invalidRejected eq true invalidWriteRefused eq true deletedRejected eq true deletedPanelRefused eq true \
+  recoveredPanelState eq true recreatedSaved eq true recreatedSiblingPreserved eq true finalApps eq 1

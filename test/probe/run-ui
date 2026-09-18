@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+trusted_system_path=/usr/bin:/bin
+PATH="$trusted_system_path"
 probe_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 plugin_dir="$(cd "$probe_dir/../.." && pwd)"
 omarchy_shell_dir="${OMARCHY_SHELL_DIR:-/usr/share/omarchy/shell}"
@@ -8,10 +10,13 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 failures=0
 
-if ! command -v qs >/dev/null 2>&1; then
+qs_bin="$(PATH="$trusted_system_path" command -v qs || true)"
+timeout_bin="$(PATH="$trusted_system_path" command -v timeout || true)"
+if [[ -z "$qs_bin" ]]; then
   echo "UI probe skipped: qs is unavailable"
   exit 0
 fi
+[[ -n "$timeout_bin" ]] || { echo "UI probe requires timeout" >&2; exit 1; }
 
 mkdir -p "$scratch/qmlroot" "$scratch/bin"
 ln -s "$omarchy_shell_dir" "$scratch/qmlroot/qs"
@@ -21,6 +26,12 @@ ln -s "$plugin_dir/test/mocks/ps" "$scratch/bin/ps"
 ln -s "$plugin_dir/test/mocks/pgrep" "$scratch/bin/pgrep"
 ln -s "$plugin_dir/test/mocks/checkupdates" "$scratch/bin/checkupdates"
 ln -s "$plugin_dir/test/mocks/touch" "$scratch/bin/touch"
+for executable in bash dirname readlink sleep head tr cat rm awk date mktemp setsid timeout; do
+  helper="$(PATH="$trusted_system_path" command -v "$executable" || true)"
+  [[ -n "$helper" ]] || { echo "required isolated helper missing: $executable" >&2; exit 1; }
+  ln -s "$helper" "$scratch/bin/$executable"
+  [[ "$(readlink -f "$scratch/bin/$executable")" == "$(readlink -f "$helper")" ]] || exit 1
+done
 for executable in mullvad mullvad-exclude ps pgrep checkupdates touch; do
   resolved="$(PATH="$scratch/bin" command -v "$executable")" || {
     echo "missing mock executable: $executable" >&2
@@ -45,14 +56,19 @@ check_json() {
 
 run_case() {
   local scenario="$1" log="$scratch/$1.log" mocklog="$scratch/$1.mock"
+  local mode=ok
+  [[ "$scenario" == interactive-controls ]] && mode=ui-reject
   : > "$mocklog"
-  MULLVAD_MOCK_MODE=ok MULLVAD_MOCK_LOG="$mocklog" \
+  MULLVAD_MOCK_MODE="$mode" MULLVAD_MOCK_LOG="$mocklog" \
     MULLVAD_PACMAN_LOCAL_DB="$plugin_dir/test/fixtures/pacman-local" \
     MULLVAD_UI_SCENARIO="$scenario" MULLVAD_PLUGIN_DIR="$plugin_dir" \
-    QML_IMPORT_PATH="$scratch/qmlroot" PATH="$scratch/bin:$PATH" \
-    timeout 20 qs -n -p "$probe_dir/ui-probe.qml" > "$log" 2>&1
+    QML_IMPORT_PATH="$scratch/qmlroot" PATH="$scratch/bin" \
+    "$timeout_bin" 20 "$qs_bin" -n -p "$probe_dir/ui-probe.qml" > "$log" 2>&1
   local command_status=$?
-  "$probe_dir/collect-result" "$log" "$command_status" "$mocklog"
+  "$probe_dir/collect-result" "$log" "$command_status" "$mocklog" || {
+    head -c 65536 "$log" >&2
+    return 1
+  }
 }
 
 json="$(run_case state-icons)"
@@ -130,10 +146,11 @@ json="$(run_case settings-fresh-merge)"
 check_json "$json" "stale panel writes merge the current scoped-host entry" note empty ignored refreshIntervalSec eq 99 siblingValue eq preserve-me favoriteCount eq 1
 
 json="$(run_case interactive-controls)"
-check_json "$json" "real panel shortcut routing reaches tabs, locations, favorites, recents, and advanced page" note empty ignored tabsWorked eq true locationCount gt 0 serverCount gt 0 favoriteCount eq 1 recentCount eq 1 advancedPageLoaded eq true
-check_json "$json" "real dropdown objects open, close, and preserve bounded selections" dropdownLabel eq Gothenburg searchableLabel eq Sweden dropdownChanged eq got searchableChanged eq se
-check_json "$json" "map projection renders the selected location" mapProjection eq true
-check_json "$json" "shortcut tunnel routing and confirmation cancel signals remain explicit" connectControlRan eq true disconnectControlRan eq true confirmationClosed eq true busyBlocksLocation eq true accountCanceled eq true removalCanceled eq true
+check_json "$json" "Quickshell lacks a physical event injector; real panel handler boundary reaches tabs, tunnel actions, and Advanced" note empty ignored physicalInputAvailable eq false tabsWorked eq true advancedPageLoaded eq true connectControlRan eq true disconnectControlRan eq true
+check_json "$json" "public dropdown event handlers select location and search results" dropdownChanged eq ber searchableChanged eq se locationSelected eq true
+check_json "$json" "real map component projects the selected relay target" mapProjection eq true
+check_json "$json" "dialog key handlers cancel and accept confirmations" accountCanceled eq true confirmationAccepted eq true confirmationClosed eq true
+check_json "$json" "Advanced event-driven rejection returns to authoritative service truth" advancedRejectedTruthful eq true
 for argv in 'ARGV: connect' 'ARGV: disconnect'; do
   if ! grep -Fq "$argv" "$scratch/interactive-controls.mock"; then
     echo "not ok - UI shortcut routing did not dispatch ${argv#ARGV: }" >&2

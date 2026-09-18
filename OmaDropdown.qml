@@ -49,6 +49,27 @@ Item {
   function open() { popup.open() }
   function close() { popup.close() }
   function toggle() { popup.opened ? popup.close() : popup.open() }
+  function focusTrigger() { trigger.forceActiveFocus() }
+  function handleTriggerKey(key) {
+    if (key === Qt.Key_Return || key === Qt.Key_Enter || key === Qt.Key_Space || key === Qt.Key_Down) {
+      toggle(); return true
+    }
+    if (key === Qt.Key_Escape && popup.opened) { close(); return true }
+    return false
+  }
+  function handlePopupKey(key, text) {
+    if (optionList.currentIndex < 0)
+      optionList.currentIndex = Math.max(0, optionList.indexOfValue(value))
+    if (key === Qt.Key_Escape) { close(); return true }
+    if (key === Qt.Key_Down || text === "j") {
+      optionList.currentIndex = Math.min(options.length - 1, optionList.currentIndex + 1); return true
+    }
+    if (key === Qt.Key_Up || text === "k") {
+      optionList.currentIndex = Math.max(0, optionList.currentIndex - 1); return true
+    }
+    if (key === Qt.Key_Return || key === Qt.Key_Enter) { optionList.selectCurrent(); return true }
+    return false
+  }
 
   signal changed(string value)
   signal hovered(bool isHovered)
@@ -104,13 +125,7 @@ Item {
       }
 
       Keys.onPressed: function(event) {
-        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
-            || event.key === Qt.Key_Space || event.key === Qt.Key_Down) {
-          popup.opened ? popup.close() : popup.open()
-          event.accepted = true
-        } else if (event.key === Qt.Key_Escape && popup.opened) {
-          popup.close(); event.accepted = true
-        }
+        if (root.handleTriggerKey(event.key)) event.accepted = true
       }
 
       Text {
@@ -180,16 +195,7 @@ Item {
 
           Keys.priority: Keys.BeforeItem
           Keys.onPressed: function(event) {
-            if (event.key === Qt.Key_Escape) { popup.close(); event.accepted = true }
-            else if (event.key === Qt.Key_Down || event.text === "j") {
-              optionList.currentIndex = Math.min(root.options.length - 1, optionList.currentIndex + 1)
-              event.accepted = true
-            } else if (event.key === Qt.Key_Up || event.text === "k") {
-              optionList.currentIndex = Math.max(0, optionList.currentIndex - 1)
-              event.accepted = true
-            } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-              optionList.selectCurrent(); event.accepted = true
-            }
+            if (root.handlePopupKey(event.key, event.text)) event.accepted = true
           }
           implicitHeight: contentHeight
           clip: true

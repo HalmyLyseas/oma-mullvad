@@ -18,6 +18,8 @@ test("CLI contract fails closed unless mullvad resolves to its exact mock", () =
     assert.match(source, /command -v mullvad/);
     assert.match(source, /readlink -f[^\n]*test\/mocks\/mullvad/);
     assert.doesNotMatch(source, /PATH="\$scratch\/bin:\$PATH"/);
+    assert.match(source, /trusted_system_path='?\/usr\/bin:\/bin'?/);
+    assert.match(source, /PATH="\$trusted_system_path" command -v node/);
 });
 
 for (const runner of ["test/probe/run", "test/probe/run-ui"]) {
@@ -31,7 +33,28 @@ for (const runner of ["test/probe/run", "test/probe/run-ui"]) {
         assert.match(source, /command -v "\$executable"/);
         assert.match(source, /readlink -f.*test\/mocks\/\$executable/);
     });
+    test(`${runner} never appends the host PATH`, () => {
+        const source = readFileSync(join(root, runner), "utf8");
+        assert.doesNotMatch(source, /PATH="\$[^"\n]*:\$PATH"/);
+        assert.match(source, /PATH="\$[^"\n]*(?:path_dir|scratch\/bin)"/);
+        assert.match(source, /qs_bin=.*command -v qs/);
+        assert.match(source, /timeout_bin=.*command -v timeout/);
+        assert.match(source, /trusted_system_path='?\/usr\/bin:\/bin'?/);
+        assert.match(source, /PATH="\$trusted_system_path" command -v qs/);
+    });
+    test(`${runner} bounds diagnostic log output`, () => {
+        const source = readFileSync(join(root, runner), "utf8");
+        assert.match(source, /head -c 65536/);
+        assert.doesNotMatch(source, /cat \"\$[^\"]*log\"/);
+    });
 }
+
+test("scoped settings runner uses the same verified executable boundary", () => {
+    const source = readFileSync(join(root, "test/probe/run-settings"), "utf8");
+    assert.match(source, /PATH="\$scratch\/empty-bin"/);
+    assert.match(source, /readlink -f.*\$helper/);
+    assert.match(source, /PATH="\$trusted_system_path" command -v qs/);
+});
 
 test("the excluded-application launcher mock is executable", () => {
     const path = join(root, "test/mocks/mullvad-exclude");
