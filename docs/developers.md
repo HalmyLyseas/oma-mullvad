@@ -51,8 +51,11 @@ The gate runs:
 3. `test/run-cli-contract`, which runs the read-only CLI contract against an inert test-local `mullvad` mock and verifies its exact argv inventory.
 4. `test/probe/run` for mocked process, timeout, output-limit, listener, race, grouping, package metadata, and isolated read-only update-check behavior.
 5. `test/probe/run-ui` against the real `BarWidget.qml` and `Panel.qml`, including System availability without the CLI or daemon, under the selected Omarchy shell source.
-6. `test/probe/run-settings` against the current scoped host facade and an isolated `shell.json`.
-7. Node tests, runner/mock syntax, QML lint, and manifest validation again from a clean archive of the proposed index.
+6. `test/quicktest/run`, which drives real `QtTest.TestCase` keyboard and pointer events through Panel routing, both dropdowns, confirmation dialogs, and WorldMap markers under the Cage gate.
+7. `test/probe/run-settings` against the current scoped host facade and an isolated `shell.json`.
+8. Node tests, runner/mock syntax, QML lint, and manifest validation again from a clean archive of the proposed index.
+
+The physical-input suite requires `qmltestrunner`, provided on Arch by `qt6-declarative` at `/usr/lib/qt6/bin/qmltestrunner`. The runner first accepts `command -v qmltestrunner`, then checks that explicit Arch path, and fails closed when neither is available.
 
 The probe suites mock all VPN-changing commands, `checkupdates`, process lookup, and excluded-application launch; they must not mutate the live daemon or invoke a real package manager or network update check. CI clones exact Omarchy `v4.0.3` and `v4.0.4` tags and runs the gate once against each tag's `shell/` and `bin/omarchy-plugin-validate`. Local validation defaults to `/usr/share/omarchy/shell` and the installed `omarchy-plugin-validate`; set `OMARCHY_SHELL_DIR` and `OMARCHY_PLUGIN_VALIDATOR` to test other source trees.
 

@@ -146,7 +146,7 @@ json="$(run_case settings-fresh-merge)"
 check_json "$json" "stale panel writes merge the current scoped-host entry" note empty ignored refreshIntervalSec eq 99 siblingValue eq preserve-me favoriteCount eq 1
 
 json="$(run_case interactive-controls)"
-check_json "$json" "Quickshell lacks a physical event injector; real panel handler boundary reaches tabs, tunnel actions, and Advanced" note empty ignored physicalInputAvailable eq false tabsWorked eq true advancedPageLoaded eq true connectControlRan eq true disconnectControlRan eq true
+check_json "$json" "component handler coverage complements Qt Quick physical input for tabs, tunnel actions, and Advanced" note empty ignored tabsWorked eq true advancedPageLoaded eq true connectControlRan eq true disconnectControlRan eq true
 check_json "$json" "public dropdown event handlers select location and search results" dropdownChanged eq ber searchableChanged eq se locationSelected eq true
 check_json "$json" "real map component projects the selected relay target" mapProjection eq true
 check_json "$json" "dialog key handlers cancel and accept confirmations" accountCanceled eq true confirmationAccepted eq true confirmationClosed eq true

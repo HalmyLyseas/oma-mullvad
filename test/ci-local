@@ -45,7 +45,11 @@ clean_archive() {
       return 1
     fi
     bash -n "$archive_dir/$file" || return 1
-  done < <(git -C "$root" ls-files -z 'test/probe/run*' 'test/probe/collect-result' 'test/mocks/*' 'test/all' 'test/ci-local' 'test/run-cli-contract')
+  done < <(git -C "$root" ls-files -z 'test/probe/run*' 'test/probe/collect-result' 'test/quicktest/run' 'test/mocks/*' 'test/all' 'test/ci-local' 'test/run-cli-contract')
+  [[ -f "$archive_dir/test/quicktest/tst_physical_input.qml" ]] || {
+    echo "clean archive missing test/quicktest/tst_physical_input.qml" >&2
+    return 1
+  }
   command -v qs >/dev/null || { echo "clean archive requires qs" >&2; return 1; }
   node --check "$archive_dir/test/probe/collect-result.mjs" || return 1
   node --check "$archive_dir/test/cli-contract.mjs" || return 1

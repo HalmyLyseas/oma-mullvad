@@ -321,8 +321,7 @@ ShellRoot {
           mapProjection: map && map.visible && map.pointX(service.locations[1]) > 0 && map.pointY(service.locations[1]) > 0,
           confirmationClosed: !controlsPanel._probeConfirmDialog.opened,
           accountCanceled: !accountRan,
-          confirmationAccepted: confirmationRan,
-          physicalInputAvailable: false
+          confirmationAccepted: confirmationRan
         }
         root.interactionPhase = 0
         interactionWait.start()
