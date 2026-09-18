@@ -46,6 +46,17 @@ run_case() {
   ln -s "$plugin_dir/test/mocks/ps" "$path_dir/ps"
   ln -s "$plugin_dir/test/mocks/pgrep" "$path_dir/pgrep"
   ln -s "$plugin_dir/test/mocks/checkupdates" "$path_dir/checkupdates"
+  for executable in mullvad mullvad-exclude ps pgrep checkupdates; do
+    local resolved
+    resolved="$(PATH="$path_dir" command -v "$executable")" || {
+      echo "missing mock executable: $executable" >&2
+      return 1
+    }
+    [[ "$(readlink -f "$resolved")" == "$(readlink -f "$plugin_dir/test/mocks/$executable")" ]] || {
+      echo "unsafe executable boundary: $executable -> $resolved" >&2
+      return 1
+    }
+  done
   : > "$scratch/$name.mock"
   MULLVAD_MOCK_MODE="$mode" MULLVAD_MOCK_LOG="$scratch/$name.mock" \
     MULLVAD_MOCK_LISTEN_SCRIPT="$listen_script" \

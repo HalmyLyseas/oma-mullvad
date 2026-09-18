@@ -20,6 +20,16 @@ ln -s "$plugin_dir/test/mocks/mullvad-exclude" "$scratch/bin/mullvad-exclude"
 ln -s "$plugin_dir/test/mocks/ps" "$scratch/bin/ps"
 ln -s "$plugin_dir/test/mocks/pgrep" "$scratch/bin/pgrep"
 ln -s "$plugin_dir/test/mocks/checkupdates" "$scratch/bin/checkupdates"
+for executable in mullvad mullvad-exclude ps pgrep checkupdates; do
+  resolved="$(PATH="$scratch/bin" command -v "$executable")" || {
+    echo "missing mock executable: $executable" >&2
+    exit 1
+  }
+  [[ "$(readlink -f "$resolved")" == "$(readlink -f "$plugin_dir/test/mocks/$executable")" ]] || {
+    echo "unsafe executable boundary: $executable -> $resolved" >&2
+    exit 1
+  }
+done
 
 check_json() {
   local json="$1" label="$2"

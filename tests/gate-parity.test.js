@@ -21,6 +21,8 @@ test("clean archive checks every tracked runner and mock syntax", () => {
     assert.match(source, /git[^\n]*ls-files[^\n]*test\/probe[^\n]*test\/mocks/);
     assert.match(source, /bash -n/);
     assert.match(source, /test\/all/);
+    assert.match(source, /\[\[ -x "\$root\/\$file" && ! -x "\$archive_dir\/\$file"/);
+    assert.match(source, /command -v qs/);
 });
 
 test("local inventory contains service, UI, and scoped-host probes", () => {

@@ -16,6 +16,12 @@ for (const runner of ["test/probe/run", "test/probe/run-ui"]) {
         const source = readFileSync(join(root, runner), "utf8");
         assert.match(source, /test\/mocks\/mullvad-exclude/);
     });
+    test(`${runner} verifies every executable mock before running`, () => {
+        const source = readFileSync(join(root, runner), "utf8");
+        assert.match(source, /for executable in mullvad mullvad-exclude ps pgrep checkupdates/);
+        assert.match(source, /command -v "\$executable"/);
+        assert.match(source, /readlink -f.*test\/mocks\/\$executable/);
+    });
 }
 
 test("the excluded-application launcher mock is executable", () => {

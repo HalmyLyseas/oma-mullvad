@@ -38,11 +38,15 @@ clean_archive() {
   local tree file
   tree="$(git -C "$root" write-tree)" || return 1
   git -C "$root" archive "$tree" | tar -x -C "$archive_dir" || return 1
-  while IFS= read -r file; do
+  while IFS= read -r -d '' file; do
     [[ -f "$archive_dir/$file" ]] || { echo "clean archive missing $file" >&2; return 1; }
+    if [[ -x "$root/$file" && ! -x "$archive_dir/$file" ]]; then
+      echo "clean archive lost executable mode: $file" >&2
+      return 1
+    fi
     bash -n "$archive_dir/$file" || return 1
-  done < <(git -C "$root" ls-files 'test/probe/run*' 'test/probe/collect-result' 'test/mocks/*' 'test/all' 'test/ci-local' 'test/run-cli-contract')
-  [[ -x "$archive_dir/test/all" ]] || { echo "clean archive test/all is not executable" >&2; return 1; }
+  done < <(git -C "$root" ls-files -z 'test/probe/run*' 'test/probe/collect-result' 'test/mocks/*' 'test/all' 'test/ci-local' 'test/run-cli-contract')
+  command -v qs >/dev/null || { echo "clean archive requires qs" >&2; return 1; }
   node --check "$archive_dir/test/probe/collect-result.mjs" || return 1
   node --check "$archive_dir/test/cli-contract.mjs" || return 1
   node --check "$archive_dir/test/verify-cli-contract-log.mjs" || return 1
