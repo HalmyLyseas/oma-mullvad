@@ -23,6 +23,10 @@ if [[ "$mode" == listener-flood && "$*" == "status --json listen" ]]; then
 fi
 
 if [[ "$mode" == action-hang && "$*" == "account logout" ]]; then exec sleep 600; fi
+if [[ "$mode" == partial-batch && "$*" == "split-tunnel delete 1234" ]]; then
+  echo "mock partial batch failure" >&2
+  exit 9
+fi
 
 if [[ "${1:-}" == account && "${2:-}" == login ]]; then
   IFS= read -r line || line=""
@@ -67,6 +71,8 @@ case "$*" in
   "dns get") printf 'Custom DNS: no\nBlock ads: false\nBlock trackers: false\nBlock malware: false\n' ;;
   "anti-censorship get") printf 'mode: auto\nudp2tcp settings: any port\n' ;;
   "split-tunnel list") awk '{ print $1 }' "$fixtures/ps-table.txt" ;;
-  connect|disconnect) echo ok ;;
+  connect|disconnect|reconnect) echo ok ;;
+  "account logout"|"lockdown-mode set "*|"auto-connect set "*|"lan set "*|\
+  "relay set "*|"dns set "*|"anti-censorship set "*|"split-tunnel delete "*) echo ok ;;
   *) echo "unhandled mock invocation: $*" >&2; exit 2 ;;
 esac

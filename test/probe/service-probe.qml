@@ -11,6 +11,15 @@ ShellRoot {
   property bool launchRejected: false
   property bool launchAccepted: false
   property bool busyDuringUpdateCheck: false
+  property bool busyGateObserved: false
+  property int mutationStep: 0
+  property bool partialFailureObserved: false
+  property bool recoverySucceeded: false
+  property bool availabilityRecoveryRan: false
+  property bool cliDisappeared: false
+  property bool cliRecovered: false
+  property bool daemonDisappeared: false
+  property bool daemonRecovered: false
   property string scenario: Quickshell.env("MULLVAD_PROBE_SCENARIO")
   property var observedStates: []
   property string lastObservedState: ""
@@ -53,8 +62,32 @@ ShellRoot {
           actionDrain.start()
         } else if (root.scenario === "login") {
           root.elapsed = 0
-          root.service.login("1234567890123456")
+          root.service.login(Array(17).join("0"))
           actionDrain.start()
+        } else if (root.scenario === "mutations") {
+          root.elapsed = 0
+          root.runMutationStep()
+        } else if (root.scenario === "partial-batch") {
+          root.mutationStep = 1
+          root.service.removeExcludedPids([1234, 5678])
+          actionDrain.start()
+        } else if (root.scenario === "availability-recovery") {
+          if (root.availabilityRecoveryRan) root.finish("")
+          else {
+            root.availabilityRecoveryRan = true
+            root.service._applyRead("probe", "", "not found", 127)
+            root.cliDisappeared = !root.service.installed
+            root.service._applyRead("probe", "mullvad-cli 2026.4", "", 0)
+            root.cliRecovered = root.service.installed
+            root.service._pendingStatusSeq = root.service._statusApplySeq
+            root.service._applyRead("status", "", "daemon unavailable", 1)
+            root.daemonDisappeared = !root.service.daemonRunning
+            root.service._pendingStatusSeq = root.service._statusApplySeq
+            root.service._applyRead("status", '{"state":"disconnected"}', "", 0)
+            root.daemonRecovered = root.service.daemonRunning
+            root.elapsed = 0
+            drain.start()
+          }
         } else if (root.scenario === "listener-flood") {
           root.elapsed = 0
           listenerDrain.start()
@@ -168,10 +201,71 @@ ShellRoot {
       root.elapsed += interval
       if (!root.service.busy && root.service._readQueue.length === 0 && root.service._readKind === "") {
         stop()
-        root.finish("")
+        if (root.scenario === "mutations") root.runMutationStep()
+        else if (root.scenario === "partial-batch" && root.mutationStep === 1) {
+          root.partialFailureObserved = root.service.lastError !== ""
+          root.mutationStep = 2
+          root.service.disconnectTunnel()
+          start()
+        } else if (root.scenario === "partial-batch") {
+          root.recoverySucceeded = root.service.lastError === ""
+          root.finish("")
+        } else root.finish("")
       }
       else if (root.elapsed > 10000) root.finish("action did not drain")
     }
+  }
+
+  function runMutationStep() {
+    mutationStep++
+    if (mutationStep === 1) {
+      prepareMutationRelay()
+      service.connectTunnel()
+      service.connectTunnel()
+      busyGateObserved = service.actionStatus.indexOf("Wait for") !== -1
+    } else if (mutationStep === 2) service.disconnectTunnel()
+    else if (mutationStep === 3) {
+      prepareMutationRelay()
+      service.selectLocation("se", "got", true)
+    } else if (mutationStep === 4) {
+      prepareMutationRelay()
+      service.selectLocation("se", "got", false, "se-got-wg-001")
+    } else if (mutationStep === 5) {
+      prepareMutationRelay()
+      service.setLockdown(true)
+      service.setAutoConnect(true)
+      service.setLanSharing(true)
+      service.setProviders(["Example"])
+      service.setOwnership("owned")
+      service.setIpVersion("ipv4")
+      service.setMultihop(true)
+      service.setEntryLocation("se", "got")
+      service.setDnsDefault({ blockAds: true, blockMalware: true })
+      service.setDnsCustom(["1.1.1.1"])
+      service.setAntiCensorshipMode("udp2tcp")
+      service.setAntiCensorshipPort("udp2tcp", 443)
+    } else if (mutationStep === 6) service.login(Array(17).join("0"))
+    else if (mutationStep === 7) {
+      service.logout()
+      service.removeExcludedPids([1234, 5678])
+    } else {
+      finish("")
+      return
+    }
+    actionDrain.start()
+  }
+
+  function prepareMutationRelay() {
+      service.locations = [{
+        countryCode: "se", cityCode: "got", country: "Sweden", city: "Gothenburg",
+        latitude: 57.7, longitude: 11.9,
+        servers: [{ hostname: "se-got-wg-001", provider: "Example", ownership: "owned",
+                    ips: ["192.0.2.1", "2001:db8::1"], active: true }]
+      }]
+      service.relayConstraints = {
+        location: { type: "city", countryCode: "se", cityCode: "got" },
+        providers: [], ownership: "any", ipVersion: "any", multihop: false, entry: {}
+      }
   }
 
   function finish(note) {
@@ -209,6 +303,14 @@ ShellRoot {
       updateCheckWatchdogs: service._updateCheckWatchdogFiredCount,
       updateCheckOverflows: service._updateCheckOverflowCount,
       busyDuringUpdateCheck: root.busyDuringUpdateCheck,
+      busyGateObserved: root.busyGateObserved,
+      mutationStep: root.mutationStep,
+      partialFailureObserved: root.partialFailureObserved,
+      recoverySucceeded: root.recoverySucceeded,
+      cliDisappeared: root.cliDisappeared,
+      cliRecovered: root.cliRecovered,
+      daemonDisappeared: root.daemonDisappeared,
+      daemonRecovered: root.daemonRecovered,
       note: note
     }))
     Qt.quit()

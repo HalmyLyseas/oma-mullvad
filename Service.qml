@@ -96,7 +96,8 @@ Item {
   property int _updateCheckOutputChars: 0
   property double _updateCheckAttemptedAt: 0
   property bool _autoUpdateCheckPending: false
-  readonly property bool busy: actionProcess.running || _actionQueue.length > 0
+  property bool _actionArmed: false
+  readonly property bool busy: _actionArmed || actionProcess.running || _actionQueue.length > 0
     || readProcess.running || _readQueue.length > 0
   property bool _readWatchdogFired: false
   property bool _actionWatchdogFired: false
@@ -534,6 +535,7 @@ Item {
     actionProcess.quiet = !!quiet
     actionProcess.command = command
     actionStatus = label + "…"
+    _actionArmed = true
     actionProcess.running = true
   }
 
@@ -933,6 +935,7 @@ Item {
   }
 
   function _finalizeAction(exitCode, exitStatus, startError) {
+    _actionArmed = false
     actionWatchdog.stop()
     actionKillTimer.stop()
     actionProcess.secret = ""

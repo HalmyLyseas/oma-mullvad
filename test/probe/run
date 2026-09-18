@@ -156,4 +156,34 @@ json="$(run_case status-failure-clears-daemon ok status-failure-clears-daemon)"
 check_json "$json" "status failure clears stale daemon diagnostics" daemonVersion empty ignored daemonRunning eq false
 check_orphans status-failure-clears-daemon
 
+json="$(run_case mutations ok mutations)"
+check_json "$json" "all mutation families drain through the mocked service" note empty ignored mutationStep eq 8 busyGateObserved eq true
+for argv in \
+  'ARGV: connect' 'ARGV: disconnect' \
+  'ARGV: relay set location se got' 'ARGV: relay set location se got se-got-wg-001' \
+  'ARGV: lockdown-mode set on' 'ARGV: auto-connect set on' 'ARGV: lan set allow' \
+  'ARGV: relay set provider Example' 'ARGV: relay set ownership owned' \
+  'ARGV: relay set ip-version ipv4' \
+  'ARGV: relay set multihop on' 'ARGV: relay set entry location se got' \
+  'ARGV: dns set default --block-ads --block-malware' 'ARGV: dns set custom 1.1.1.1' \
+  'ARGV: anti-censorship set mode udp2tcp' 'ARGV: anti-censorship set udp2tcp --port 443' \
+  'ARGV: account login' 'ARGV: account logout' \
+  'ARGV: split-tunnel delete 1234' 'ARGV: split-tunnel delete 5678'; do
+  check_command "mutation uses fixed argv: ${argv#ARGV: }" grep -Fq "$argv" "$scratch/mutations.mock"
+done
+check_command "account secret never reaches the mock log" bash -c '! grep -Eq "[0-9]{16}" "$1"' _ "$scratch/mutations.mock"
+check_command "successful mutation refreshes authoritative state afterward" node "$probe_dir/log-order.mjs" "$scratch/mutations.mock" 'ARGV: connect' 'ARGV: status --json'
+check_orphans mutations
+
+json="$(run_case partial-batch partial-batch partial-batch)"
+check_json "$json" "partial excluded-PID failure stops the batch and later actions recover" note empty ignored partialFailureObserved eq true recoverySucceeded eq true
+check_command "partial batch attempted its first fixed PID only" grep -Fq 'ARGV: split-tunnel delete 1234' "$scratch/partial-batch.mock"
+check_command "partial batch did not run a stale queued PID" bash -c '! grep -Fq "ARGV: split-tunnel delete 5678" "$1"' _ "$scratch/partial-batch.mock"
+check_command "service accepted a fixed-argv action after failure" grep -Fq 'ARGV: disconnect' "$scratch/partial-batch.mock"
+check_orphans partial-batch
+
+json="$(run_case availability-recovery ok availability-recovery)"
+check_json "$json" "CLI and daemon disappearance clear readiness and recover" note empty ignored cliDisappeared eq true cliRecovered eq true daemonDisappeared eq true daemonRecovered eq true
+check_orphans availability-recovery
+
 exit "$((failures > 0))"
