@@ -31,6 +31,12 @@ OmaMullvad targets Mullvad VPN 2026.4. Install and enable Mullvad VPN separately
 
 The panel has Overview, Locations, Advanced, and Excluded Apps pages. It is keyboard-accessible.
 
+## Known limitations
+
+Tailscale's netfilter rules can interfere with Mullvad's Linux split-tunnelling marks. On affected systems, including the combination of Tailscale 1.102.3 and Mullvad 2026.4, an application appears in the excluded-process list but public connections time out. This is tracked upstream in [tailscale/tailscale#19787](https://github.com/tailscale/tailscale/issues/19787).
+
+Do not disable Tailscale netfilter without providing equivalent firewall and tailnet-routing rules. The plugin does not alter Tailscale or system firewall configuration.
+
 ## Hotkeys
 
 OmaMullvad does not add keybindings automatically. Example `~/.config/hypr/bindings.lua` entries:
