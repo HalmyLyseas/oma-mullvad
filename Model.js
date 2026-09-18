@@ -79,6 +79,11 @@ function parseDaemonVersion(raw) {
     };
 }
 
+function packageEpochIso(value) {
+    if (!/^\d{1,12}$/.test(text(value)) || Number(value) <= 0) return "";
+    return new Date(Number(value) * 1000).toISOString();
+}
+
 function parsePackageInfo(raw) {
     var result = [];
     var lines = boundedLines(raw, 16, 16384);
@@ -92,7 +97,9 @@ function parsePackageInfo(raw) {
             name: name,
             version: version,
             description: plainText(fields[2], 256),
-            installedAt: plainText(fields[3], 64)
+            installedAt: plainText(fields[3], 64),
+            installedAtIso: packageEpochIso(fields[4]),
+            buildAt: packageEpochIso(fields[5])
         });
     }
     return result;
@@ -150,8 +157,26 @@ var TUNNEL_STATES = ["connected", "connecting", "disconnecting", "disconnected",
 function isTunnelStateEvent(raw) {
     var values = parseJsonLines(raw);
     if (!values.length) return false;
-    var state = text(statusPayload(values[values.length - 1]).state || "").toLowerCase();
-    return TUNNEL_STATES.indexOf(state) !== -1;
+    var state = statusPayload(values[values.length - 1]).state;
+    return typeof state === "string" && TUNNEL_STATES.indexOf(state.toLowerCase()) !== -1;
+}
+
+function isStatusSnapshot(raw) {
+    var value;
+    try { value = typeof raw === "string" ? JSON.parse(raw) : raw; }
+    catch (_) { return false; }
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    value = statusPayload(value);
+    if (!value || typeof value !== "object" || Array.isArray(value)
+            || TUNNEL_STATES.indexOf(value.state) === -1) return false;
+    var details = value.details;
+    if (details !== undefined) {
+        if (typeof details === "string")
+            return value.state === "disconnecting" && ["nothing", "block", "reconnect"].indexOf(details) !== -1;
+        if (!details || typeof details !== "object" || Array.isArray(details)) return false;
+    }
+    var location = details && details.location !== undefined ? details.location : value.location;
+    return location === undefined || location === null || (typeof location === "object" && !Array.isArray(location));
 }
 
 function parseStatus(raw) {
@@ -378,7 +403,7 @@ function normalizeFavorites(values) {
     var result = [];
     var seen = {};
     values = Array.isArray(values) ? values : [];
-    for (var i = 0; i < values.length && result.length < 9; ++i) {
+    for (var i = 0; i < values.length && i < 256 && result.length < 9; ++i) {
         var favorite = normalizeLocation(values[i]);
         if (favorite && !seen[favorite.key]) {
             seen[favorite.key] = true;
@@ -1036,6 +1061,7 @@ var api = {
     parsePackageInfo: parsePackageInfo,
     parseUpdateCheck: parseUpdateCheck,
     parseStatus: parseStatus,
+    isStatusSnapshot: isStatusSnapshot,
     isTunnelStateEvent: isTunnelStateEvent,
     parseRelayList: parseRelayList,
     filterServers: filterServers,

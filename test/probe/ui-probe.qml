@@ -108,7 +108,20 @@ ShellRoot {
   }
 
   function runScenario() {
-    if (scenario === "state-icons") {
+    if (scenario === "action-feedback") {
+      var feedbackPanel = widget._probePanelItem
+      feedbackPanel.open()
+      service.lastError = ""
+      service.actionStatus = "Updating lockdown…"
+      Qt.callLater(function() {
+        var label = root.findNamed(feedbackPanel._probePageItem, "overviewActionStatus")
+        if (!label) { root.finish("Overview action feedback is missing"); return }
+        var message = label.text
+        service.lastError = service.actionStatus
+        root.finish("", { message: message, duplicateHidden: !label.visible,
+          plainText: label.textFormat === Text.PlainText })
+      })
+    } else if (scenario === "state-icons") {
       service.installed = true
       service.daemonRunning = true
       service.state = "connected"
@@ -474,6 +487,17 @@ ShellRoot {
         })
       } else if (elapsed > 5000) root.finish("service lifecycle did not settle")
     }
+  }
+
+  function findNamed(item, name) {
+    if (!item) return null
+    if (item.objectName === name) return item
+    var children = item.children || []
+    for (var i = 0; i < children.length; i++) {
+      var found = findNamed(children[i], name)
+      if (found) return found
+    }
+    return null
   }
 
   function finish(note, values) {

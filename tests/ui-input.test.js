@@ -5,6 +5,14 @@ const assert = require("node:assert/strict");
 
 const root = join(__dirname, "..");
 
+test("application icons decode asynchronously at a fixed size", () => {
+    const panel = readFileSync(join(root, "Panel.qml"), "utf8");
+    const image = panel.slice(panel.indexOf("      Image {"), panel.indexOf("      ColumnLayout {", panel.indexOf("      Image {")));
+    assert.match(image, /asynchronous: true/);
+    assert.match(image, /sourceSize.width: Style.space\(24\)/);
+    assert.match(image, /sourceSize.height: Style.space\(24\)/);
+});
+
 test("interactive UI probe uses honest rendered handler boundaries", () => {
     const probe = readFileSync(join(root, "test/probe/ui-probe.qml"), "utf8");
     const scenario = probe.slice(probe.indexOf('scenario === "interactive-controls"'),

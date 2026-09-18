@@ -71,6 +71,9 @@ run_case() {
   }
 }
 
+json="$(run_case action-feedback)"
+check_json "$json" "Overview renders plain action feedback and hides duplicate errors" note empty ignored message eq 'Updating lockdown…' duplicateHidden eq true plainText eq true
+
 json="$(run_case state-icons)"
 check_json "$json" "real BarWidget and Panel instantiate without engine errors" note empty ignored
 check_json "$json" "Panel receives the singleton service" panelLoaded eq true panelServiceMatches eq true

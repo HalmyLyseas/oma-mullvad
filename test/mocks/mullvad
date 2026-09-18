@@ -67,6 +67,7 @@ case "$*" in
     ;;
   version) printf 'Current version: 2026.4\nIs supported: true\nSuggested upgrade: none\n' ;;
   "status --json")
+    if [[ "$mode" == status-garbage ]]; then printf 'garbage\n'; exit 0; fi
     if [[ "$mode" == availability-recovery
           && -e "${MULLVAD_MOCK_AVAILABILITY_TRIGGER:-/definitely/missing}"
           && "$(next_count status)" -eq 1 ]]; then
@@ -77,9 +78,15 @@ case "$*" in
       rm -f "$MULLVAD_MOCK_STATUS_DELAY_TRIGGER"
       sleep 1.2
     fi
-    cat "$fixtures/status-json.txt"
+    cat "${MULLVAD_MOCK_STATUS_FIXTURE:-$fixtures/status-json.txt}"
     ;;
   "status --json listen")
+    if [[ "$mode" == listener-malformed ]]; then
+      printf '%s\n' '{"state":"connected","details":{}}'
+      sleep 0.3
+      printf '%s\n' '{"state":{"toString":null}}' '{"state":"disconnected","details":{}}'
+      exec sleep 600
+    fi
     if [[ -n "${MULLVAD_MOCK_LISTEN_SCRIPT:-}" ]]; then
       while IFS=' ' read -r delay payload; do
         [[ -n "$delay" && -n "$payload" ]] || continue

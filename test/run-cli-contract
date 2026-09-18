@@ -16,6 +16,6 @@ ln -s "$root/test/mocks/mullvad" "$scratch/bin/mullvad" || exit 1
 resolved="$(PATH="$scratch/bin" command -v mullvad)" || exit 1
 [[ "$(readlink -f "$resolved")" == "$(readlink -f "$root/test/mocks/mullvad")" ]] || exit 1
 : > "$scratch/mock.log"
-MULLVAD_MOCK_MODE=cli-contract MULLVAD_MOCK_LOG="$scratch/mock.log" \
+MULLVAD_MOCK_MODE="${MULLVAD_MOCK_MODE:-cli-contract}" MULLVAD_MOCK_LOG="$scratch/mock.log" \
   PATH="$scratch/bin" "$node_bin" "$root/test/cli-contract.mjs"
 "$node_bin" "$root/test/verify-cli-contract-log.mjs" "$scratch/mock.log"

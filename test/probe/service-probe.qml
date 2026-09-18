@@ -101,7 +101,7 @@ ShellRoot {
         } else if (root.scenario === "listener-flood") {
           root.elapsed = 0
           listenerDrain.start()
-        } else if (root.scenario === "state-sequence") {
+        } else if (root.scenario === "state-sequence" || root.scenario === "listener-malformed") {
           sequenceWait.start()
         } else if (root.scenario === "status-race") {
           raceTrigger.command = ["touch", Quickshell.env("MULLVAD_MOCK_STATUS_DELAY_TRIGGER")]
@@ -171,7 +171,7 @@ ShellRoot {
   Timer {
     id: sequenceWait
     interval: 1300
-    onTriggered: root.finish("")
+    onTriggered: root.finish(root.scenario === "listener-malformed" ? root.checkListenerChunks() : "")
   }
 
   Process {
@@ -286,6 +286,22 @@ ShellRoot {
         location: { type: "city", countryCode: "se", cityCode: "got" },
         providers: [], ownership: "any", ipVersion: "any", multihop: false, entry: {}
       }
+  }
+
+  function checkListenerChunks() {
+    if (service.state !== "disconnected" || service.connected)
+      return "malformed mock listener event swallowed the disconnect"
+    service._applyListenerLine('{"state":"connected","details":{}}', false)
+    var seq = service._statusSeq
+    try {
+      service._appendListenerChunk('{"state":{"toString":null}}\n{"settings":{}}\n{"relay_list":{}}\n'
+        + '{"state":"connected","details":7}\n{"state":"disconnected","details":{}}\n', false)
+    } catch (e) { return "listener chunk escaped: " + e }
+    if (service.state !== "disconnected" || service.connected)
+      return "malformed line swallowed the same-chunk disconnect"
+    if (service._statusSeq !== seq + 1 || service._statusApplySeq !== seq + 1)
+      return "invalid or non-tunnel lines consumed status sequence numbers"
+    return ""
   }
 
   function checkOutputBuffers() {

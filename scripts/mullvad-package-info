@@ -25,10 +25,14 @@ for package in mullvad-vpn mullvad-vpn-daemon; do
   version="$(field VERSION "$content")"
   description="$(field DESC "$content")"
   installed_epoch="$(field INSTALLDATE "$content")"
+  built_epoch="$(field BUILDDATE "$content")"
   [[ "$name" == "$package" && -n "$version" ]] || continue
   installed_at=""
   if [[ "$installed_epoch" =~ ^[0-9]{1,12}$ ]] && (( installed_epoch > 0 )); then
     installed_at="$(date --date="@$installed_epoch" '+%Y-%m-%d %H:%M' 2>/dev/null || true)"
   fi
-  printf '%s\t%s\t%s\t%s\n' "$package" "${version:0:128}" "${description:0:256}" "${installed_at:0:64}"
+  [[ "$installed_epoch" =~ ^[0-9]{1,12}$ ]] || installed_epoch=""
+  [[ "$built_epoch" =~ ^[0-9]{1,12}$ ]] || built_epoch=""
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$package" "${version:0:128}" "${description:0:256}" \
+    "${installed_at:0:64}" "$installed_epoch" "$built_epoch"
 done

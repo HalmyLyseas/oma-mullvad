@@ -1,2 +1,7 @@
 /.hermes/
 /exchange/
+*.bak
+node_modules/
+*~
+*.swp
+.DS_Store

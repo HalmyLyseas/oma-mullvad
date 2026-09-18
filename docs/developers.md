@@ -36,6 +36,18 @@ System package metadata uses the normal bounded read queue and is collected even
 
 The service's six private stdout/stderr arrays are imperative buffers, consumed by finalizers rather than reactive UI bindings. Appends mutate these arrays in place; reset replaces them. Keep output counters, redaction, tail flushing, overflow termination, and watchdogs independent of array change notifications.
 
+## Public IPC
+
+The target is `halmylyseas.oma-mullvad`. Besides panel navigation, status, tunnel actions, excluded groups, and favourites, it exposes:
+
+- `lockdown("on"|"off")`: dispatches the fixed lockdown setter and returns `ok`. Invalid values return `invalid lockdown mode` without dispatch. As with the existing tunnel IPC methods, `ok` acknowledges the request, not command completion; readiness failures appear in service feedback.
+- `checkUpdates()`: invokes the debounced read-only update check and returns its current status. It does not install updates.
+- `systemInfo()`: JSON with `cliVersion`, `cliVersionSupported`, `lockdown`, `daemonVersion`, `daemonSupported`, `suggestedUpgrade`, `daemonRunning`, `daemonPid`, `packages`, `updateCheckStatus`, `updateCheckedAt`, `updateAvailable`, and `updateTargets`.
+
+The service stores update results as bounded display strings; IPC maps them back to `{ name, current, latest }` target objects. `updateAvailable` reflects the last successful results even after a failed check, so consumers must consult status and timestamp. Package objects preserve `name`, `version`, ISO UTC `installedAt`, and `buildAt`, and add `description`. Missing or invalid timestamps are empty strings. The local helper carries the original epoch fields alongside the panel's formatted install date so IPC does not round or reinterpret local time. The System page remains read-only.
+
+See [the threat model](threat-model.md) for trust boundaries and residual risks.
+
 ## Local dropdown controls
 
 `OmaDropdown.qml` and `OmaSearchableDropdown.qml` are local MIT-licensed Omarchy controls with corrected trigger-click closing. They use the host kit's focus, hover-cursor, and popup styling rather than a native ComboBox. Both accept strings or `{ value, label }` option objects; the searchable control also accepts `description` and filters labels and descriptions case-insensitively. Closing its popup clears the filter.

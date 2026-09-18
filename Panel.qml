@@ -51,10 +51,11 @@ Panel {
   readonly property string stateIcon: hostWidget ? hostWidget.stateIcon : "connecting"
   readonly property string tunnelHint: service.active ? "Disconnect Mullvad VPN" : "Connect Mullvad VPN"
 
-  function arrayFrom(value) {
+  function arrayFrom(value, limit) {
     if (!value || typeof value === "string" || typeof value.length !== "number") return []
     var result = []
-    for (var i = 0; i < value.length; i++) result.push(value[i])
+    var length = Math.min(value.length, limit === 512 ? 512 : 256)
+    for (var i = 0; i < length; i++) result.push(value[i])
     return result
   }
 
@@ -75,7 +76,7 @@ Panel {
 
   function locationFor(saved) {
     var key = locationKey(saved)
-    var locations = arrayFrom(service.locations)
+    var locations = arrayFrom(service.locations, 512)
     for (var i = 0; i < locations.length; i++)
       if (locationKey(locations[i]) === key) return locations[i]
     return null
@@ -146,7 +147,7 @@ Panel {
   }
 
   function cycleFavorite(direction) {
-    var available = Model.filterLocations(arrayFrom(service.locations), "", [], service.relayConstraints)
+    var available = Model.filterLocations(arrayFrom(service.locations, 512), "", [], service.relayConstraints)
     var result = Model.cycleFavorite(arrayFrom(favoriteLocations), available, {
       countryCode: service.currentCountryCode,
       cityCode: service.currentCityCode
@@ -168,12 +169,12 @@ Panel {
   }
 
   function filteredLocations() {
-    return Model.filterLocations(arrayFrom(service.locations), locationQuery,
+    return Model.filterLocations(arrayFrom(service.locations, 512), locationQuery,
                                  arrayFrom(favoriteLocations), service.relayConstraints)
   }
 
   function locationOptions() {
-    return Model.filterLocations(arrayFrom(service.locations), "", [], service.relayConstraints).map(function(location) {
+    return Model.filterLocations(arrayFrom(service.locations, 512), "", [], service.relayConstraints).map(function(location) {
       var servers = Model.filterServers(arrayFrom(location.servers), service.relayConstraints)
       var hints = []
       for (var i = 0; i < servers.length; i++)
@@ -242,7 +243,7 @@ Panel {
       return location ? location.city + ", " + location.country
         : String(constraint.countryCode || "").toUpperCase() + "/" + String(constraint.cityCode || "").toUpperCase()
     if (type === "country") {
-      var locations = arrayFrom(service.locations)
+      var locations = arrayFrom(service.locations, 512)
       for (var i = 0; i < locations.length; i++)
         if (String(locations[i].countryCode || "") === String(constraint.countryCode || ""))
           return locations[i].country + " · any city"
@@ -256,7 +257,7 @@ Panel {
     var exact = locationFor(constraint)
     if (exact) return exact
     if (String(constraint.type || "") !== "country") return null
-    var locations = arrayFrom(service.locations)
+    var locations = arrayFrom(service.locations, 512)
     for (var i = 0; i < locations.length; i++)
       if (String(locations[i].countryCode || "") === String(constraint.countryCode || "")) return locations[i]
     return null
@@ -266,7 +267,7 @@ Panel {
     if (!service.connected) return null
     var exact = locationFor({ countryCode: service.currentCountryCode, cityCode: service.currentCityCode })
     if (exact) return exact
-    var locations = arrayFrom(service.locations)
+    var locations = arrayFrom(service.locations, 512)
     for (var i = 0; i < locations.length; i++)
       if (String(locations[i].country || "").toLowerCase() === String(service.country || "").toLowerCase()
           && String(locations[i].city || "").toLowerCase() === String(service.city || "").toLowerCase()) return locations[i]
@@ -435,6 +436,36 @@ Panel {
     function connect(): string { service.connectTunnel(); return "ok" }
     function disconnect(): string { service.disconnectTunnel(); return "ok" }
     function toggleTunnel(): string { service.toggleTunnel(); return "ok" }
+    function lockdown(mode: string): string {
+      if (mode !== "on" && mode !== "off") return "invalid lockdown mode"
+      service.setLockdown(mode === "on")
+      return "ok"
+    }
+    function checkUpdates(): string { return service.checkForUpdates() }
+    function systemInfo(): string {
+      var targets = Model.parseUpdateCheck(service.updateResults.slice(0, 2).join("\n")).map(function(line) {
+        var fields = line.split(" ")
+        return { name: fields[0], current: fields[1], latest: fields[3] }
+      })
+      return JSON.stringify({
+        cliVersion: service.cliVersion,
+        cliVersionSupported: service.cliVersion ? service.cliVersionSupported : null,
+        lockdown: service.lockdown,
+        daemonVersion: service.daemonVersion,
+        daemonSupported: service.daemonSupported,
+        suggestedUpgrade: service.suggestedUpgrade,
+        daemonRunning: service.daemonRunning,
+        daemonPid: service.daemonPid,
+        packages: service.packages.map(function(pkg) {
+          return { name: pkg.name, version: pkg.version, description: pkg.description,
+            installedAt: pkg.installedAtIso || "", buildAt: pkg.buildAt || "" }
+        }),
+        updateCheckStatus: service.updateCheckStatus,
+        updateCheckedAt: service.updateCheckedAt,
+        updateAvailable: targets.length > 0,
+        updateTargets: targets
+      })
+    }
     function excluded(): string { return JSON.stringify(root.excludedGroups()) }
     function nextFavorite(): string { return root.cycleFavorite(1) }
     function previousFavorite(): string { return root.cycleFavorite(-1) }
@@ -625,6 +656,18 @@ Panel {
         visible: service.connected && (service.country !== "" || service.ip !== "")
         width: parent.width
         text: "Exit: " + [service.city, service.country, service.hostname, service.ip].filter(function(value) { return String(value || "") !== "" }).join(" · ")
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        wrapMode: Text.WordWrap
+      }
+
+      Text {
+        objectName: "overviewActionStatus"
+        textFormat: Text.PlainText
+        visible: service.actionStatus !== "" && service.actionStatus !== service.lastError
+        width: parent.width
+        text: service.actionStatus
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.bodySmall
@@ -1759,8 +1802,10 @@ Panel {
       Image {
         Layout.preferredWidth: Style.space(24)
         Layout.preferredHeight: Style.space(24)
-        sourceSize.width: width
-        sourceSize.height: height
+        sourceSize.width: Style.space(24)
+        sourceSize.height: Style.space(24)
+        asynchronous: true
+        cache: true
         source: {
           var icon = String(appRow.app && appRow.app.icon || "")
           var resolved = icon ? Quickshell.iconPath(icon, true) : ""

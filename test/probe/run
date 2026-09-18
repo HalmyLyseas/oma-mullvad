@@ -120,9 +120,17 @@ check_json "$json" "one app launch folds into one group" excludedGroupCount eq 1
 check_command "login stdin reaches direct child" grep -q 'login-received-len=16' "$scratch/ok.mock"
 check_orphans ok
 
+json="$(run_case status-garbage status-garbage none)"
+check_json "$json" "exit-zero malformed status never claims daemon readiness" daemonRunning eq false lastError contains 'Could not parse Mullvad status' note empty ignored
+check_orphans status-garbage
+
 json="$(run_case buffers ok output-buffers)"
 check_json "$json" "all private output buffers retain chunks, tails, redaction and exact limits without copying" note empty ignored
 check_orphans buffers
+
+json="$(run_case listener-malformed listener-malformed listener-malformed)"
+check_json "$json" "malformed listener lines preserve later disconnects and sequence numbers" note empty ignored finalState eq disconnected finalConnected eq false
+check_orphans listener-malformed
 
 json="$(run_case hang hang none)"
 check_json "$json" "read watchdog fires once" readWatchdogs eq 1

@@ -65,7 +65,8 @@ test("package metadata helper only reads a bounded local package database", () =
     mkdirSync(join(db, "unrelated-1.0-1"), { recursive: true });
     writeFileSync(join(db, "mullvad-vpn-2026.4-1", "desc"), [
         "%NAME%", "mullvad-vpn", "", "%VERSION%", "2026.4-1", "",
-        "%DESC%", "Mullvad <b>VPN</b>", "", "%INSTALLDATE%", "1788264000", ""
+        "%DESC%", "Mullvad <b>VPN</b>", "", "%INSTALLDATE%", "1788264000", "",
+        "%BUILDDATE%", "1788177600", ""
     ].join("\n"));
     writeFileSync(join(db, "unrelated-1.0-1", "desc"), "%NAME%\nunrelated\n");
 
@@ -76,6 +77,19 @@ test("package metadata helper only reads a bounded local package database", () =
     assert.match(result.stdout, /^mullvad-vpn\t2026\.4-1\tMullvad VPN\t\d{4}-\d{2}-\d{2}/m);
     assert.ok(result.stdout.length <= 16384);
     assert.doesNotMatch(result.stdout, /unrelated|[<>]/);
+    const metadata = Model.parsePackageInfo(result.stdout)[0];
+    assert.equal(metadata.installedAtIso, new Date(1788264000 * 1000).toISOString());
+    assert.equal(metadata.buildAt, new Date(1788177600 * 1000).toISOString());
+    const missing = Model.parsePackageInfo("mullvad-vpn\t1\tVPN\tunknown\t0\tnot-a-date")[0];
+    assert.equal(missing.installedAtIso, "");
+    assert.equal(missing.buildAt, "");
+    const desc = join(db, "mullvad-vpn-2026.4-1", "desc");
+    writeFileSync(desc, readFileSync(desc, "utf8").replace("1788177600", "1788177600000"));
+    const malformed = spawnSync("bash", [join(root, "scripts/mullvad-package-info")], {
+        encoding: "utf8", env: { ...process.env, MULLVAD_PACMAN_LOCAL_DB: db }
+    });
+    assert.equal(malformed.status, 0, malformed.stderr);
+    assert.equal(Model.parsePackageInfo(malformed.stdout)[0].buildAt, "");
 });
 
 test("update helper invokes only PATH-shadowed checkupdates and bounds results", () => {

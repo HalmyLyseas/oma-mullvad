@@ -47,9 +47,7 @@ assert.ok(Model.isCliVersionSupported(cliVersion),
   `installed mullvad-cli ${cliVersion || "(unparsed)"} is not in supported series ${Model.SUPPORTED_CLI_SERIES}`);
 
 check(["status", "--json"], output => {
-  const snapshot = JSON.parse(output);
-  assert.ok(["connected", "connecting", "disconnected", "disconnecting", "error", "blocked"].includes(snapshot.state));
-  assert.equal(typeof snapshot.details, "object");
+  assert.ok(Model.isStatusSnapshot(output), "Invalid Mullvad status snapshot");
 });
 check(["relay", "list"], output => {
   assert.match(output, /^[^\n]+ \([a-z]{2}\)$/m);
