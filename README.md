@@ -68,7 +68,7 @@ bash test/ci-local
 
 Use `bash test/ci-local --no-cage` only as a fallback for an existing live session when Cage cannot be used.
 
-The live CLI contract is read-only. VPN-changing operations are mocked by the automated suites.
+The CLI contract and every VPN-changing operation run against inert test-local mocks; automated suites never invoke the live Mullvad CLI.
 
 ## License
 

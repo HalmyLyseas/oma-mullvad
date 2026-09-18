@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+mkdir -p "$scratch/bin"
+ln -s "$root/test/mocks/mullvad" "$scratch/bin/mullvad"
+: > "$scratch/mock.log"
+MULLVAD_MOCK_MODE=cli-contract MULLVAD_MOCK_LOG="$scratch/mock.log" \
+  PATH="$scratch/bin:$PATH" node "$root/test/cli-contract.mjs"
+node "$root/test/verify-cli-contract-log.mjs" "$scratch/mock.log"

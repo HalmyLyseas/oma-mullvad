@@ -48,7 +48,7 @@ The gate runs:
 
 1. QML lint and manifest validation.
 2. `node --test tests/*.test.js` for pure model and sink checks.
-3. `node test/cli-contract.mjs`, which invokes only read-only Mullvad commands and skips only when the CLI is absent.
+3. `test/run-cli-contract`, which runs the read-only CLI contract against an inert test-local `mullvad` mock and verifies its exact argv inventory.
 4. `test/probe/run` for mocked process, timeout, output-limit, listener, race, grouping, package metadata, and isolated read-only update-check behavior.
 5. `test/probe/run-ui` against the real `BarWidget.qml` and `Panel.qml`, including System availability without the CLI or daemon, under the selected Omarchy shell source.
 6. `test/probe/run-settings` against the current scoped host facade and an isolated `shell.json`.

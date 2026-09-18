@@ -70,7 +70,14 @@ case "$*" in
   "lan get") echo "Local network sharing setting: block" ;;
   "dns get") printf 'Custom DNS: no\nBlock ads: false\nBlock trackers: false\nBlock malware: false\n' ;;
   "anti-censorship get") printf 'mode: auto\nudp2tcp settings: any port\n' ;;
-  "split-tunnel list") awk '{ print $1 }' "$fixtures/ps-table.txt" ;;
+  "split-tunnel list")
+    if [[ "$mode" == cli-contract ]]; then
+      printf 'Excluded PIDs:\n'
+      awk '{ print $1 }' "$fixtures/ps-table.txt"
+    else
+      awk '{ print $1 }' "$fixtures/ps-table.txt"
+    fi
+    ;;
   connect|disconnect|reconnect) echo ok ;;
   "account logout"|"lockdown-mode set "*|"auto-connect set "*|"lan set "*|\
   "relay set "*|"dns set "*|"anti-censorship set "*|"split-tunnel delete "*) echo ok ;;

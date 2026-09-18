@@ -5,6 +5,12 @@ const assert = require("node:assert/strict");
 
 const root = join(__dirname, "..");
 
+test("all executable boundaries run through test-local wrappers", () => {
+    const source = readFileSync(join(root, "test/all"), "utf8");
+    assert.match(source, /test\/run-cli-contract/);
+    assert.doesNotMatch(source, /node[^\n]+test\/cli-contract\.mjs/);
+});
+
 for (const runner of ["test/probe/run", "test/probe/run-ui"]) {
     test(`${runner} shadows the excluded-application launcher`, () => {
         const source = readFileSync(join(root, runner), "utf8");
