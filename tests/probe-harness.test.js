@@ -17,8 +17,8 @@ function collect(log, status = 0) {
     return result;
 }
 
-test("probe result collector accepts one clean passing result", () => {
-    const result = collect('PROBE_RESULT {"note":"","passed":true}\n');
+test("probe result collector accepts one prefixed Quickshell result", () => {
+    const result = collect('INFO: PROBE_RESULT {"note":"","passed":true}\n');
     assert.equal(result.status, 0, result.stderr);
     assert.deepEqual(JSON.parse(result.stdout), { note: "", passed: true });
 });

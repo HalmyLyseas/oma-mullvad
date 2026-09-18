@@ -40,7 +40,10 @@ if (engineError.test(log)) {
     process.exit(1);
 }
 
-const lines = log.split(/\r?\n/).filter(line => line.startsWith("PROBE_RESULT "));
+const lines = log.split(/\r?\n/).map(line => {
+    const index = line.indexOf("PROBE_RESULT ");
+    return index < 0 ? null : line.slice(index + "PROBE_RESULT ".length);
+}).filter(value => value !== null);
 if (lines.length !== 1) {
     console.error(`expected exactly one PROBE_RESULT, found ${lines.length}`);
     process.exit(1);
@@ -48,7 +51,7 @@ if (lines.length !== 1) {
 
 let result;
 try {
-    result = JSON.parse(lines[0].slice("PROBE_RESULT ".length));
+    result = JSON.parse(lines[0]);
 } catch {
     console.error("PROBE_RESULT is not valid JSON");
     process.exit(1);
