@@ -62,9 +62,7 @@ Item {
     blockSocialMedia: false
   })
   property var antiCensorship: ({ mode: "auto", port: "any" })
-  property var excludedPids: []
   property var excludedProcesses: []
-  readonly property int excludedGroupCount: Model.groupExcludedProcesses(excludedProcesses, []).length
 
   property string actionStatus: ""
   property string lastError: ""
@@ -187,7 +185,7 @@ Item {
       var remaining = finiteOutputChars - root[charsKey]
       if (value.length >= remaining) { value = value.slice(0, remaining); atLimit = true }
       var outputKey = errorStream ? "_" + kind + "ErrorLines" : "_" + kind + "Lines"
-      root[outputKey] = root[outputKey].concat([value])
+      root[outputKey].push(value)
       root[linesKey]++
       root[charsKey] += value.length
       if (root[linesKey] >= finiteOutputLines) atLimit = true
@@ -201,9 +199,7 @@ Item {
   }
 
   function _resetReadOutput() { _resetOutput("read") }
-  function _appendReadOutput(line, errorStream) { _appendOutput("read", line, errorStream) }
   function _resetActionOutput() { _resetOutput("action") }
-  function _appendActionOutput(line, errorStream) { _appendOutput("action", line, errorStream) }
   function _resetUpdateCheckOutput() { _resetOutput("updateCheck") }
 
   function _hasRead(kind) {
@@ -213,9 +209,9 @@ Item {
     return false
   }
 
-  function _enqueueRead(kind, command, timeoutMs) {
+  function _enqueueRead(kind, command) {
     if (_hasRead(kind)) return
-    _readQueue = _readQueue.concat([{ kind: kind, command: command, timeoutMs: timeoutMs || 0 }])
+    _readQueue = _readQueue.concat([{ kind: kind, command: command }])
     _startNextRead()
   }
 
@@ -228,7 +224,7 @@ Item {
     if (request.kind === "status") root._pendingStatusSeq = ++root._statusSeq
     _resetReadOutput()
     _readGen++
-    readWatchdog.interval = request.timeoutMs || root.readTimeoutMs
+    readWatchdog.interval = root.readTimeoutMs
     readWatchdog.restart()
     readProcess.command = request.command
     readProcess.running = true
@@ -236,27 +232,27 @@ Item {
 
   function refreshAll() {
     _enqueueRead("packageInfo", [packageInfoScript])
-    _enqueueRead("probe", ["/usr/bin/env", "mullvad", "--version"])
+    _enqueueRead("probe", ["/usr/bin/env"].concat(Model.argv("version")))
   }
 
   function _enqueueAuthoritativeReads() {
-    _enqueueRead("status", ["mullvad", "status", "--json"])
-    _enqueueRead("account", ["mullvad", "account", "get"])
-    _enqueueRead("relays", ["mullvad", "relay", "list"])
-    _enqueueRead("constraints", ["mullvad", "relay", "get"])
-    _enqueueRead("lockdown", ["mullvad", "lockdown-mode", "get"])
-    _enqueueRead("autoconnect", ["mullvad", "auto-connect", "get"])
-    _enqueueRead("lan", ["mullvad", "lan", "get"])
-    _enqueueRead("dns", ["mullvad", "dns", "get"])
-    _enqueueRead("antiCensorship", ["mullvad", "anti-censorship", "get"])
-    _enqueueRead("excludedPids", ["mullvad", "split-tunnel", "list"])
-    _enqueueRead("daemonVersion", ["mullvad", "version"])
+    _enqueueRead("status", Model.argv("status"))
+    _enqueueRead("account", Model.argv("accountGet"))
+    _enqueueRead("relays", Model.argv("relayList"))
+    _enqueueRead("constraints", Model.argv("relayGet"))
+    _enqueueRead("lockdown", Model.argv("lockdownGet"))
+    _enqueueRead("autoconnect", Model.argv("autoConnectGet"))
+    _enqueueRead("lan", Model.argv("lanSharingGet"))
+    _enqueueRead("dns", Model.argv("dnsGet"))
+    _enqueueRead("antiCensorship", Model.argv("antiCensorshipGet"))
+    _enqueueRead("excludedPids", Model.argv("excludedPidList"))
+    _enqueueRead("daemonVersion", Model.argv("daemonVersion"))
     _enqueueRead("daemonPid", ["pgrep", "-x", "mullvad-daemon"])
   }
 
   function refreshStatus() {
     if (installed) {
-      _enqueueRead("status", ["mullvad", "status", "--json"])
+      _enqueueRead("status", Model.argv("status"))
       _enqueueRead("daemonPid", ["pgrep", "-x", "mullvad-daemon"])
     } else refreshAll()
   }
@@ -454,7 +450,7 @@ Item {
           lwoPort: anti.lwoPort
         }
       } else if (kind === "excludedPids") {
-        excludedPids = Model.parseExcludedPids(raw)
+        var excludedPids = Model.parseExcludedPids(raw)
         var pidCsv = _excludedPidsCsv(excludedPids)
         if (pidCsv) _enqueueRead("excludedProcs", ["ps", "-o", "pid=,ppid=,uunit=,comm=", "-p", pidCsv])
         else excludedProcesses = []
@@ -683,7 +679,7 @@ Item {
   }
 
   function refreshExcluded() {
-    if (installed) _enqueueRead("excludedPids", ["mullvad", "split-tunnel", "list"])
+    if (installed) _enqueueRead("excludedPids", Model.argv("excludedPidList"))
   }
 
   function removeExcludedPids(pids) {
@@ -841,7 +837,7 @@ Item {
 
   Process {
     id: listenerProcess
-    command: ["mullvad", "status", "--json", "listen"]
+    command: Model.argv("status", { listen: true })
     running: false
     property string outputRemainder: ""
     property string errorRemainder: ""

@@ -10,6 +10,8 @@
 
 ## Development workflow
 
+Keep code comment blocks to at most two lines; put longer explanations in `docs/developers.md`.
+
 Use tests first for behavior changes: add a focused failing test, confirm the expected failure, implement the minimum change, then run the relevant suite. Before committing, run:
 
 ```bash

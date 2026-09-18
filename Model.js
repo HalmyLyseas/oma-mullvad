@@ -852,6 +852,7 @@ function argv(action, params) {
     params = params || {};
     switch (action) {
     case "version": return ["mullvad", "--version"];
+    case "daemonVersion": return ["mullvad", "version"];
     case "status": return ["mullvad", "status", "--json"].concat(params.listen ? ["listen"] : []);
     case "relayList": return ["mullvad", "relay", "list"];
     case "relayGet": return ["mullvad", "relay", "get"];
@@ -983,10 +984,14 @@ function desktopEntryScore(entry, query) {
     var keywords = desktopEntryKeywords(entry);
     var id = plainText(entry && entry.id, 256).toLowerCase();
     var haystack = [name, genericName, comment, keywords, id].join(" ").toLowerCase();
-    var acronym = desktopEntryWords([name, genericName, keywords, id].join(" ")).map(function(word) {
+    var acronym = "";
+    var acronymIndex = -1;
+    if (needle.length <= 5) {
+        acronym = desktopEntryWords([name, genericName, keywords, id].join(" ")).map(function(word) {
             return word.charAt(0);
         }).join("");
-    var acronymIndex = needle.length <= 5 ? acronym.indexOf(needle) : -1;
+        acronymIndex = acronym.indexOf(needle);
+    }
     var terms = needle.split(/\s+/).filter(Boolean);
     for (var i = 0; i < terms.length; ++i)
         if (haystack.indexOf(terms[i]) < 0)

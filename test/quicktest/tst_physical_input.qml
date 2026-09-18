@@ -1,5 +1,6 @@
 import QtQuick
 import QtTest
+import Quickshell
 import qs.Ui as Ui
 import "../.." as Plugin
 
@@ -64,6 +65,8 @@ Item {
     property int selectCount: 0
     property string selectedCountry: ""
     property string selectedCity: ""
+    property var dnsInput: null
+    function setDnsCustom(value) { dnsInput = value }
     function refreshAll() { refreshCount++ }
     function refreshExcluded() {}
     function toggleTunnel() { toggleCount++ }
@@ -153,6 +156,9 @@ Item {
       cancelSpy.target = null
       confirmSpy.target = null
       mapSpy.target = null
+      fakeService.excludedProcesses = []
+      DesktopEntries.applications.values = []
+      fakeService.dnsInput = null
       fakeService.locations = []
       fakeService.selectCount = 0
       fakeService.selectedCountry = ""
@@ -179,6 +185,45 @@ Item {
         if (found) return found
       }
       return null
+    }
+
+    function test_dns_apply_dispatches_raw_string_to_service() {
+      var panel = createTemporaryObject(panelComponent, scene)
+      panel.showPage(2)
+      var apply = findTextItem(panel._probePageItem, "Apply")
+      verify(apply !== null)
+      var field = apply.parent.children[0]
+      verify(field.placeholderText.indexOf("Custom DNS:") === 0)
+      var input = " 1.1.1.1, 2606:4700:4700::1111 "
+      field.text = input
+      apply.clicked()
+      compare(typeof fakeService.dnsInput, "string")
+      compare(fakeService.dnsInput, input)
+    }
+
+    function test_empty_exclusions_skip_catalogue_and_remain_reactive() {
+      var scans = 0
+      DesktopEntries.applications.values = [{
+        id: "example.desktop", name: "Example",
+        get execString() { scans++; return "/usr/bin/example" }
+      }]
+      var panel = createTemporaryObject(panelComponent, scene)
+      panel.showPage(3)
+      var page = panel._probePageItem
+      verify(page !== null)
+      compare(page.groups.length, 0)
+      compare(scans, 0)
+      fakeService.excludedProcesses = [{ pid: 1234, ppid: 1, comm: "example", unit: "" }]
+      tryCompare(page.groups, "length", 1)
+      compare(page.groups[0].label, "Example")
+      verify(scans > 0)
+      var previousScans = scans
+      fakeService.excludedProcesses = []
+      tryCompare(page.groups, "length", 0)
+      compare(scans, previousScans)
+      fakeService.excludedProcesses = [{ pid: 5678, ppid: 1, comm: "example", unit: "" }]
+      tryCompare(page.groups, "length", 1)
+      compare(page.groups[0].pids[0], 5678)
     }
 
     function test_dropdown_keyboard_open_move_select() {

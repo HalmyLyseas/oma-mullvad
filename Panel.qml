@@ -33,7 +33,6 @@ Panel {
   readonly property var _probePageItem: pageLoader.item
   readonly property var _probeConfirmDialog: confirmDialog
   readonly property var _probeKeyCatcher: keyCatcher
-  property var _probeFirstLocationRow: null
   readonly property string appEmptyText: "No installed applications match your search."
 
   Connections {
@@ -325,7 +324,9 @@ Panel {
   }
 
   function excludedGroups() {
-    return Model.groupExcludedProcesses(arrayFrom(service.excludedProcesses), excludedApps())
+    var processes = arrayFrom(service.excludedProcesses)
+    if (processes.length === 0) return []
+    return Model.groupExcludedProcesses(processes, excludedApps())
   }
 
   function showPage(index) {
@@ -1356,7 +1357,7 @@ Panel {
           focusable: true
           enabled: dnsField.text.trim() !== "" && !service.busy
           foreground: root.foreground
-          onClicked: service.setDnsCustom(dnsField.text.split(/[\s,]+/).filter(function(value) { return value !== "" }))
+          onClicked: service.setDnsCustom(dnsField.text)
         }
         Button {
           text: "Default"

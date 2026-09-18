@@ -4,20 +4,7 @@ import qs.Commons
 import qs.Ui as Ui
 
 // Local MIT-licensed Omarchy control with corrected trigger-click closing.
-
-// Searchable dropdown. Same trigger shape as Dropdown, but
-// the popup leads with an embedded TextField that filters the option
-// list in real time. Use for pickers with enough options that scanning
-// is friction.
-//
-// Filtering is case-insensitive substring against each option's label.
-// Options can be string[] or [{ value, label, description? }] — the same
-// shape Dropdown accepts. The filter clears whenever the popup closes.
-//
-// Keyboard: Tab to focus the trigger, Enter/Space opens (search focused
-// immediately). Down arrow from the search jumps to the first match;
-// Up from the first match returns to the search. Enter selects, Esc
-// closes (and clears the filter).
+// API and keyboard behavior: docs/developers.md.
 Item {
   id: root
 
@@ -41,16 +28,10 @@ Item {
   property int popupMinHeight: Style.spacing.searchablePopupMinHeight
   property bool showLabel: true
 
-  // Panel-cursor flag. When true, the trigger renders the shared
-  // hover-cursor state. Active Qt focus defaults to the same visuals.
-  // Emits `hovered(bool)` on pointer enter/leave so the panel can keep
-  // its cursor state in sync with the mouse.
+  // Share hover-cursor styling with the panel; hovered(bool) keeps its cursor in sync.
   property bool hasCursor: false
 
-  // popupOpen + open()/close()/toggle() let a parent panel know when the
-  // dropdown owns keys (search field + result list are active) and
-  // suspend its own keyCatcher so typing into the filter doesn't drive
-  // the panel cursor.
+  // Suspend the parent key catcher while open so popup input cannot drive both cursors.
   readonly property bool popupOpen: popup.opened
   readonly property bool triggerFocused: trigger.activeFocus
   readonly property bool popupFocused: searchField.activeFocus || resultList.activeFocus

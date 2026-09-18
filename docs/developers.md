@@ -34,6 +34,14 @@ Every `mullvad` command is a direct Quickshell child with argv created by `Model
 
 System package metadata uses the normal bounded read queue and is collected even when the CLI probe fails. Daemon version and support come from `mullvad version`; `pgrep -x mullvad-daemon` supplies a PID when available. `checkupdates` runs through a dedicated `Process` that is excluded from `busy`, so a slow check cannot block VPN controls. Attempts are debounced for 60 seconds, automatic checks run after the startup grace period and then hourly, and both the helper and service process have bounded output plus TERM/KILL watchdogs. Failed checks preserve the last successful result and timestamp.
 
+The service's six private stdout/stderr arrays are imperative buffers, consumed by finalizers rather than reactive UI bindings. Appends mutate these arrays in place; reset replaces them. Keep output counters, redaction, tail flushing, overflow termination, and watchdogs independent of array change notifications.
+
+## Local dropdown controls
+
+`OmaDropdown.qml` and `OmaSearchableDropdown.qml` are local MIT-licensed Omarchy controls with corrected trigger-click closing. They use the host kit's focus, hover-cursor, and popup styling rather than a native ComboBox. Both accept strings or `{ value, label }` option objects; the searchable control also accepts `description` and filters labels and descriptions case-insensitively. Closing its popup clears the filter.
+
+Tab focuses a trigger; Enter/Space opens it. In the plain dropdown, j/k or Up/Down moves between options and Enter selects. The searchable control focuses its filter on open; Down moves into results and Up from the first result returns to the filter. Escape closes either popup. Parent panels use `popupOpen` to suspend their own key catcher while a popup owns input, and `hovered(bool)` to synchronize cursor styling.
+
 ## Validation
 
 Run the complete local gate from the repository root:

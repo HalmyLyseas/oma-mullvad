@@ -47,6 +47,39 @@ test("status JSON and listen events normalize connection details", () => {
     assert.equal(Model.parseStatus({ state: "connected", details: {} }).lockedDown, undefined);
 });
 
+test("daemon version has a fixed read-only argv", () => {
+    assert.deepEqual(Model.argv("daemonVersion", { ignored: ";bad" }), ["mullvad", "version"]);
+});
+
+test("custom DNS strings preserve tokenization, validation and the sixteen-server limit", () => {
+    assert.deepEqual(Model.argv("dnsCustom", { servers: " ,1.1.1.1,\t2606:4700:4700::1111 \n" }),
+        ["mullvad", "dns", "set", "custom", "1.1.1.1", "2606:4700:4700::1111"]);
+    for (const servers of ["", " , \t", "1.2.3.999", "1.1.1.1;id", "2001:::1", Array(17).fill("::1").join(",")])
+        assert.throws(() => Model.argv("dnsCustom", { servers }), /Invalid custom DNS/);
+    assert.equal(Model.argv("dnsCustom", { servers: Array(16).fill("::1").join(" ") }).length, 20);
+});
+
+test("long desktop queries skip acronym construction without changing scores", () => {
+    const vm = require("node:vm");
+    const context = vm.createContext({});
+    vm.runInContext(source, context);
+    const words = context.desktopEntryWords;
+    let calls = 0;
+    context.desktopEntryWords = value => { calls++; return words(value); };
+    const entry = { name: "Alpha Beta", id: "alpha.desktop", genericName: "Editor", keywords: ["Writing"] };
+    assert.equal(context.desktopEntryScore(entry, "alpha beta"), 9990);
+    assert.equal(context.desktopEntryScore(entry, "writing"), 5981);
+    assert.equal(context.desktopEntryScore(entry, "absent long query"), -1);
+    assert.equal(calls, 0);
+    assert.equal(context.desktopEntryScore(entry, "abe"), 4994);
+    assert.equal(calls, 1);
+    const acronymEntry = { id: "x", name: "Alpha Beta Charlie Delta Echo Foxtrot" };
+    assert.equal(context.desktopEntryScore(acronymEntry, "abcde"), 4993);
+    assert.equal(calls, 2);
+    assert.equal(context.desktopEntryScore(acronymEntry, "abcdef"), -1);
+    assert.equal(calls, 2);
+});
+
 test("CLI version warning only trusts the tested release series", () => {
     assert.deepEqual(Model.SUPPORTED_CLI_SERIES, ["2026.4"]);
     assert.equal(Model.parseCliVersion("mullvad-cli 2026.4.1\n"), "2026.4.1");
@@ -340,6 +373,17 @@ test("trust-boundary validation accepts useful values and rejects malformed inpu
 test("argv builder covers tunnel, relay, anti-censorship, and exclusions", () => {
     const cases = [
         ["version", {}, ["mullvad", "--version"]],
+        ["status", {}, ["mullvad", "status", "--json"]],
+        ["status", { listen: true }, ["mullvad", "status", "--json", "listen"]],
+        ["relayList", {}, ["mullvad", "relay", "list"]],
+        ["relayGet", {}, ["mullvad", "relay", "get"]],
+        ["accountGet", {}, ["mullvad", "account", "get"]],
+        ["lockdownGet", {}, ["mullvad", "lockdown-mode", "get"]],
+        ["autoConnectGet", {}, ["mullvad", "auto-connect", "get"]],
+        ["lanSharingGet", {}, ["mullvad", "lan", "get"]],
+        ["dnsGet", {}, ["mullvad", "dns", "get"]],
+        ["antiCensorshipGet", {}, ["mullvad", "anti-censorship", "get"]],
+        ["excludedPidList", {}, ["mullvad", "split-tunnel", "list"]],
         ["connect", {}, ["mullvad", "connect"]],
         ["disconnect", {}, ["mullvad", "disconnect"]],
         ["reconnect", {}, ["mullvad", "reconnect"]],

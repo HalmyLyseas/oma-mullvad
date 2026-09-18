@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import "../../Model.js" as Model
 
 ShellRoot {
   id: root
@@ -56,6 +57,8 @@ ShellRoot {
           root.elapsed = 0
           root.service._enqueueRead("probe", ["/definitely/missing/oma-mullvad-test"])
           start()
+        } else if (root.scenario === "output-buffers") {
+          root.finish(root.checkOutputBuffers())
         } else if (root.scenario === "action-hang") {
           root.elapsed = 0
           root.service.logout()
@@ -258,7 +261,7 @@ ShellRoot {
       service.setMultihop(true)
       service.setEntryLocation("se", "got")
       service.setDnsDefault({ blockAds: true, blockMalware: true })
-      service.setDnsCustom(["1.1.1.1"])
+      service.setDnsCustom(" 1.1.1.1, ")
       service.setAntiCensorshipMode("udp2tcp")
       service.setAntiCensorshipPort("udp2tcp", 443)
     } else if (mutationStep === 6) service.login(Array(17).join("0"))
@@ -285,6 +288,65 @@ ShellRoot {
       }
   }
 
+  function checkOutputBuffers() {
+    var kinds = ["read", "action", "updateCheck"]
+    for (var k = 0; k < kinds.length; k++) {
+      var kind = kinds[k]
+      var prefix = "_" + kind
+      service._resetOutput(kind)
+      var output = service[prefix + "Lines"]
+      var errors = service[prefix + "ErrorLines"]
+      var secret = Array(17).join("0")
+      service._appendOutputChunk(kind, "first\r", false)
+      service._appendOutputChunk(kind, "\naccount " + secret.slice(0, 8), false)
+      service._appendOutputChunk(kind, "warning " + secret.slice(0, 8), true)
+      service._appendOutputChunk(kind, secret.slice(8) + "\nerror tail", true)
+      service._appendOutputChunk(kind, secret.slice(8) + "\nlast tail", false)
+      service._flushOutputRemainders(kind)
+      var expected = ["first", Model.redact("account " + secret), "last tail"]
+      var expectedErrors = [Model.redact("warning " + secret), "error tail"]
+      if (JSON.stringify(service[prefix + "Lines"]) !== JSON.stringify(expected)
+          || JSON.stringify(service[prefix + "ErrorLines"]) !== JSON.stringify(expectedErrors))
+        return kind + " chunk, stream, tail or redaction mismatch"
+      if (service[prefix + "OutputLines"] !== 5
+          || service[prefix + "OutputChars"] !== expected.join("").length + expectedErrors.join("").length
+          || service[prefix + "OutputRemainder"] !== "" || service[prefix + "ErrorRemainder"] !== "")
+        return kind + " accounting mismatch"
+      if (output !== service[prefix + "Lines"] || errors !== service[prefix + "ErrorLines"])
+        return kind + " copied its private buffer while appending"
+      service._resetOutput(kind)
+      if (service[prefix + "Lines"].length || service[prefix + "ErrorLines"].length
+          || service[prefix + "OutputChars"] || service[prefix + "OutputLines"]
+          || service[prefix + "Overflowed"] || service[prefix + "Lines"] === output)
+        return kind + " reset mismatch"
+      var overflows = service[prefix + "OverflowCount"]
+      for (var i = 0; i < service.finiteOutputLines - 1; i++) service._appendOutput(kind, "x", false)
+      if (service[prefix + "Overflowed"]) return kind + " overflowed before line limit"
+      service._appendOutput(kind, "y", true)
+      service._appendOutput(kind, "ignored", false)
+      if (!service[prefix + "Overflowed"] || service[prefix + "OverflowCount"] !== overflows + 1
+          || service[prefix + "OutputLines"] !== service.finiteOutputLines
+          || service[prefix + "Lines"].length !== service.finiteOutputLines - 1
+          || service[prefix + "ErrorLines"].join("") !== "y")
+        return kind + " line bound mismatch"
+      service._resetOutput(kind)
+      service._appendOutputChunk(kind, Array(service.finiteOutputChars).join("x"), false)
+      if (service[prefix + "Overflowed"]) return kind + " overflowed before character limit"
+      service._appendOutputChunk(kind, "yz", true)
+      if (!service[prefix + "Overflowed"] || service[prefix + "OverflowCount"] !== overflows + 2
+          || service[prefix + "OutputChars"] !== service.finiteOutputChars
+          || service[prefix + "Lines"].join("").length !== service.finiteOutputChars - 1
+          || service[prefix + "ErrorLines"].join("") !== "y")
+        return kind + " character bound mismatch"
+      service._resetOutput(kind)
+      service._appendOutputChunk(kind, "fresh\n", false)
+      if (service[prefix + "Lines"].join("") !== "fresh" || service[prefix + "Overflowed"])
+        return kind + " did not recover after overflow"
+      service._resetOutput(kind)
+    }
+    return ""
+  }
+
   function finish(note) {
     if (finished) return
     finished = true
@@ -295,7 +357,7 @@ ShellRoot {
       daemonRunning: service.daemonRunning,
       locations: service.locations.length,
       excludedProcessesLength: service.excludedProcesses.length,
-      excludedGroupCount: service.excludedGroupCount,
+      excludedGroupCount: Model.groupExcludedProcesses(service.excludedProcesses, []).length,
       lastError: service.lastError,
       actionStatus: service.actionStatus,
       readWatchdogs: service._readWatchdogFiredCount,

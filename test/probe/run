@@ -9,6 +9,11 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 failures=0
 
+# Quickshell confines relative imports to the probe root.
+cp "$plugin_dir/Model.js" "$scratch/" || exit 1
+sed 's|import "../../Model.js" as Model|import "Model.js" as Model|' \
+  "$probe_dir/service-probe.qml" > "$scratch/service-probe.qml" || exit 1
+
 qs_bin="$(PATH="$trusted_system_path" command -v qs || true)"
 timeout_bin="$(PATH="$trusted_system_path" command -v timeout || true)"
 if [[ -z "$qs_bin" ]]; then
@@ -79,7 +84,7 @@ run_case() {
     MULLVAD_MOCK_TOUCH_TARGET="$scratch/$name.availability-trigger" \
     MULLVAD_PACMAN_LOCAL_DB="$plugin_dir/test/fixtures/pacman-local" \
     MULLVAD_PROBE_SCENARIO="$scenario" MULLVAD_PLUGIN_DIR="$plugin_dir" \
-    PATH="$path_dir" "$timeout_bin" 20 "$qs_bin" -n -p "$probe_dir/service-probe.qml" \
+    PATH="$path_dir" "$timeout_bin" 20 "$qs_bin" -n -p "$scratch/service-probe.qml" \
     > "$scratch/$name.log" 2>&1
   local command_status=$?
   "$probe_dir/collect-result" "$scratch/$name.log" "$command_status" "$scratch/$name.mock" || {
@@ -114,6 +119,10 @@ check_json "$json" "excluded process details resolve" excludedProcessesLength eq
 check_json "$json" "one app launch folds into one group" excludedGroupCount eq 1
 check_command "login stdin reaches direct child" grep -q 'login-received-len=16' "$scratch/ok.mock"
 check_orphans ok
+
+json="$(run_case buffers ok output-buffers)"
+check_json "$json" "all private output buffers retain chunks, tails, redaction and exact limits without copying" note empty ignored
+check_orphans buffers
 
 json="$(run_case hang hang none)"
 check_json "$json" "read watchdog fires once" readWatchdogs eq 1
