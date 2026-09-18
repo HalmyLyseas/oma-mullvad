@@ -11,6 +11,14 @@ test("all executable boundaries run through test-local wrappers", () => {
     assert.doesNotMatch(source, /node[^\n]+test\/cli-contract\.mjs/);
 });
 
+test("CLI contract fails closed unless mullvad resolves to its exact mock", () => {
+    const source = readFileSync(join(root, "test/run-cli-contract"), "utf8");
+    assert.match(source, /ln -s[^\n]*\|\| exit 1/);
+    assert.match(source, /command -v mullvad/);
+    assert.match(source, /readlink -f[^\n]*test\/mocks\/mullvad/);
+    assert.doesNotMatch(source, /PATH="\$scratch\/bin:\$PATH"/);
+});
+
 for (const runner of ["test/probe/run", "test/probe/run-ui"]) {
     test(`${runner} shadows the excluded-application launcher`, () => {
         const source = readFileSync(join(root, runner), "utf8");

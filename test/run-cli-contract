@@ -4,9 +4,16 @@ set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
+node_bin="$(command -v node)" || exit 1
 mkdir -p "$scratch/bin"
-ln -s "$root/test/mocks/mullvad" "$scratch/bin/mullvad"
+for executable in bash dirname readlink cat; do
+  helper="$(command -v "$executable")" || exit 1
+  ln -s "$helper" "$scratch/bin/$executable" || exit 1
+done
+ln -s "$root/test/mocks/mullvad" "$scratch/bin/mullvad" || exit 1
+resolved="$(PATH="$scratch/bin" command -v mullvad)" || exit 1
+[[ "$(readlink -f "$resolved")" == "$(readlink -f "$root/test/mocks/mullvad")" ]] || exit 1
 : > "$scratch/mock.log"
 MULLVAD_MOCK_MODE=cli-contract MULLVAD_MOCK_LOG="$scratch/mock.log" \
-  PATH="$scratch/bin:$PATH" node "$root/test/cli-contract.mjs"
-node "$root/test/verify-cli-contract-log.mjs" "$scratch/mock.log"
+  PATH="$scratch/bin" "$node_bin" "$root/test/cli-contract.mjs"
+"$node_bin" "$root/test/verify-cli-contract-log.mjs" "$scratch/mock.log"
