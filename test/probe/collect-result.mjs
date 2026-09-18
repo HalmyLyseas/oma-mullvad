@@ -1,5 +1,22 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
+
+const maxLogBytes = 1024 * 1024;
+
+function readBounded(path, label) {
+    let size;
+    try {
+        size = statSync(path).size;
+    } catch {
+        console.error(`cannot read ${label}`);
+        process.exit(1);
+    }
+    if (size > maxLogBytes) {
+        console.error(`${label} exceeds ${maxLogBytes} bytes`);
+        process.exit(1);
+    }
+    return readFileSync(path, "utf8");
+}
 
 const [logPath, statusText, mockLogPath] = process.argv.slice(2);
 const status = Number(statusText);
@@ -8,9 +25,9 @@ if (!logPath || !Number.isInteger(status)) {
     process.exit(2);
 }
 
-const log = readFileSync(logPath, "utf8");
+const log = readBounded(logPath, "probe log");
 if (mockLogPath) {
-    const mockLog = readFileSync(mockLogPath, "utf8");
+    const mockLog = readBounded(mockLogPath, "mock log");
     const pids = new Set([...mockLog.matchAll(/^PID=([0-9]+)(?:\s|$)/gm)].map(match => Number(match[1])));
     const leaked = [];
     for (const pid of pids) {
@@ -30,19 +47,25 @@ if (mockLogPath) {
         process.exit(1);
     }
 }
-const engineError = /(?:TypeError:|ReferenceError:|QQmlApplicationEngine failed to load component|QQmlComponent: Component is not ready|(?:^|\s)module\s+["'][^"']+["']\s+(?:version\s+\S+\s+)?is not installed(?:\s|$))/m;
+const logPrefix = /^\s*(?:(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|CRITICAL|FATAL):\s*)?/;
+function isEngineError(line) {
+    const text = line.replace(logPrefix, "");
+    return /^(?:TypeError:|ReferenceError:|QQmlApplicationEngine failed to load component|QQmlComponent: Component is not ready)(?:\s|$)/.test(text)
+        || /^(?:(?:file|qrc|resource):\/\/\/[^\r\n]*?:\d+(?::\d+)?:\s*)?module\s+["'][^"']+["']\s+(?:version\s+\S+\s+)?is not installed(?:\s|$)/.test(text)
+        || /^(?:(?:file|qrc|resource):\/\/\/[^\r\n]*?:\d+(?::\d+)?:\s*)?Type\s+[A-Za-z_][A-Za-z0-9_.]*\s+unavailable\s*$/.test(text);
+}
 if (status !== 0) {
     console.error(`probe process exited with status ${status}`);
     process.exit(1);
 }
-if (engineError.test(log)) {
+if (log.split(/\r?\n/).some(isEngineError)) {
     console.error("probe log contains a QML engine error");
     process.exit(1);
 }
 
 const lines = log.split(/\r?\n/).map(line => {
-    const index = line.indexOf("PROBE_RESULT ");
-    return index < 0 ? null : line.slice(index + "PROBE_RESULT ".length);
+    const match = line.match(/^\s*(?:(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|CRITICAL|FATAL):\s*)?PROBE_RESULT (.*)$/);
+    return match ? match[1] : null;
 }).filter(value => value !== null);
 if (lines.length !== 1) {
     console.error(`expected exactly one PROBE_RESULT, found ${lines.length}`);

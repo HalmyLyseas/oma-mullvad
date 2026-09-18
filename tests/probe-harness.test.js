@@ -24,8 +24,13 @@ test("probe result collector accepts one prefixed Quickshell result", () => {
 });
 
 test("probe result collector does not mistake application ERROR data for an engine failure", () => {
-    const result = collect('ERROR: simulated service state\nPROBE_RESULT {"note":"","passed":true}\n');
+    const result = collect('ERROR: simulated service state: Type MissingWidget unavailable\nPROBE_RESULT {"note":"","passed":true}\n');
     assert.equal(result.status, 0, result.stderr);
+});
+
+test("probe result collector rejects a result token embedded in attacker text", () => {
+    const result = collect('attacker-controlled PROBE_RESULT {"note":"","passed":true}\n');
+    assert.notEqual(result.status, 0, `unexpectedly accepted: ${result.stdout}`);
 });
 
 for (const [name, log, status] of [
@@ -39,6 +44,7 @@ for (const [name, log, status] of [
     ["late QML load error", 'PROBE_RESULT {"note":"","passed":true}\nQQmlApplicationEngine failed to load component\n', 0],
     ["late missing QML module", 'PROBE_RESULT {"note":"","passed":true}\nfile:///tmp/Late.qml:1:1: module "Missing.Module" is not installed\n', 0],
     ["late missing versioned QML module", 'PROBE_RESULT {"note":"","passed":true}\nfile:///tmp/Late.qml:1:1: module "Missing.Module" version 1.0 is not installed\n', 0],
+    ["late unavailable QML type", 'PROBE_RESULT {"note":"","passed":true}\nType MissingWidget unavailable\n', 0],
     ["duplicate result", 'PROBE_RESULT {"note":"","passed":true}\nPROBE_RESULT {"note":"","passed":true}\n', 0]
 ]) {
     test(`probe result collector rejects ${name}`, () => {
