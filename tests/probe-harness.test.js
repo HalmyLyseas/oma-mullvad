@@ -38,6 +38,7 @@ for (const [name, log, status] of [
     ["late ReferenceError", 'PROBE_RESULT {"note":"","passed":true}\nReferenceError: late failure\n', 0],
     ["late QML load error", 'PROBE_RESULT {"note":"","passed":true}\nQQmlApplicationEngine failed to load component\n', 0],
     ["late missing QML module", 'PROBE_RESULT {"note":"","passed":true}\nfile:///tmp/Late.qml:1:1: module "Missing.Module" is not installed\n', 0],
+    ["late missing versioned QML module", 'PROBE_RESULT {"note":"","passed":true}\nfile:///tmp/Late.qml:1:1: module "Missing.Module" version 1.0 is not installed\n', 0],
     ["duplicate result", 'PROBE_RESULT {"note":"","passed":true}\nPROBE_RESULT {"note":"","passed":true}\n', 0]
 ]) {
     test(`probe result collector rejects ${name}`, () => {

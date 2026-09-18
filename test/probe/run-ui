@@ -130,13 +130,13 @@ json="$(run_case settings-fresh-merge)"
 check_json "$json" "stale panel writes merge the current scoped-host entry" note empty ignored refreshIntervalSec eq 99 siblingValue eq preserve-me favoriteCount eq 1
 
 json="$(run_case interactive-controls)"
-check_json "$json" "real panel drives keyboard tabs, locations, favorites, recents, and advanced page" note empty ignored tabsWorked eq true locationCount gt 0 serverCount gt 0 favoriteCount eq 1 recentCount eq 1 advancedPageLoaded eq true
-check_json "$json" "real dropdowns open, close, and emit bounded selections" dropdownLabel eq Gothenburg searchableLabel eq Sweden dropdownChanged eq got searchableChanged eq se
+check_json "$json" "real panel shortcut routing reaches tabs, locations, favorites, recents, and advanced page" note empty ignored tabsWorked eq true locationCount gt 0 serverCount gt 0 favoriteCount eq 1 recentCount eq 1 advancedPageLoaded eq true
+check_json "$json" "real dropdown objects open, close, and preserve bounded selections" dropdownLabel eq Gothenburg searchableLabel eq Sweden dropdownChanged eq got searchableChanged eq se
 check_json "$json" "map projection renders the selected location" mapProjection eq true
-check_json "$json" "keyboard tunnel controls and real confirmation cancel paths remain explicit" connectControlRan eq true disconnectControlRan eq true confirmationClosed eq true busyBlocksLocation eq true accountCanceled eq true removalCanceled eq true
+check_json "$json" "shortcut tunnel routing and confirmation cancel signals remain explicit" connectControlRan eq true disconnectControlRan eq true confirmationClosed eq true busyBlocksLocation eq true accountCanceled eq true removalCanceled eq true
 for argv in 'ARGV: connect' 'ARGV: disconnect'; do
   if ! grep -Fq "$argv" "$scratch/interactive-controls.mock"; then
-    echo "not ok - UI keyboard control did not dispatch ${argv#ARGV: }" >&2
+    echo "not ok - UI shortcut routing did not dispatch ${argv#ARGV: }" >&2
     failures=$((failures + 1))
   fi
 done
