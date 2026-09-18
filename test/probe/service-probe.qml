@@ -15,7 +15,7 @@ ShellRoot {
   property int mutationStep: 0
   property bool partialFailureObserved: false
   property bool recoverySucceeded: false
-  property bool availabilityRecoveryRan: false
+  property int availabilityRecoveryPhase: 0
   property bool cliDisappeared: false
   property bool cliRecovered: false
   property bool daemonDisappeared: false
@@ -72,21 +72,28 @@ ShellRoot {
           root.service.removeExcludedPids([1234, 5678])
           actionDrain.start()
         } else if (root.scenario === "availability-recovery") {
-          if (root.availabilityRecoveryRan) root.finish("")
-          else {
-            root.availabilityRecoveryRan = true
-            root.service._applyRead("probe", "", "not found", 127)
-            root.cliDisappeared = !root.service.installed
-            root.service._applyRead("probe", "mullvad-cli 2026.4", "", 0)
-            root.cliRecovered = root.service.installed
-            root.service._pendingStatusSeq = root.service._statusApplySeq
-            root.service._applyRead("status", "", "daemon unavailable", 1)
-            root.daemonDisappeared = !root.service.daemonRunning
-            root.service._pendingStatusSeq = root.service._statusApplySeq
-            root.service._applyRead("status", '{"state":"disconnected"}', "", 0)
-            root.daemonRecovered = root.service.daemonRunning
+          if (root.availabilityRecoveryPhase === 0) {
+            root.availabilityRecoveryPhase = 1
             root.elapsed = 0
+            availabilityTrigger.command = ["touch", Quickshell.env("MULLVAD_MOCK_AVAILABILITY_TRIGGER")]
+            availabilityTrigger.running = true
+          } else if (root.availabilityRecoveryPhase === 1) {
+            root.cliDisappeared = root.cliDisappeared || !root.service.installed
+            root.availabilityRecoveryPhase = 2
+            root.elapsed = 0
+            root.service.refreshAll()
             drain.start()
+          } else if (root.availabilityRecoveryPhase === 2) {
+            root.cliRecovered = root.cliRecovered || root.service.installed
+            root.daemonDisappeared = root.daemonDisappeared || !root.service.daemonRunning
+            root.availabilityRecoveryPhase = 3
+            root.elapsed = 0
+            root.service.refreshAll()
+            drain.start()
+          } else {
+            root.cliRecovered = root.cliRecovered || root.service.installed
+            root.daemonRecovered = root.daemonRecovered || root.service.daemonRunning
+            root.finish("")
           }
         } else if (root.scenario === "listener-flood") {
           root.elapsed = 0
@@ -171,6 +178,16 @@ ShellRoot {
       root.service.readTimeoutMs = 3000
       root.service.refreshStatus()
       raceWait.start()
+    }
+  }
+
+  Process {
+    id: availabilityTrigger
+    running: false
+    onExited: function(exitCode) {
+      if (exitCode !== 0) { root.finish("availability trigger failed"); return }
+      root.service.refreshAll()
+      drain.start()
     }
   }
 

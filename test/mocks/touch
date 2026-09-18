@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ $# -eq 1 ]] || exit 2
+[[ -n "${MULLVAD_MOCK_TOUCH_TARGET:-}" && "$1" == "$MULLVAD_MOCK_TOUCH_TARGET" ]] || exit 2
+: > "$1"
+if [[ -n "${MULLVAD_MOCK_LOG:-}" ]]; then
+  printf 'PID=%s MODE=touch ARGV: touch <%s>\n' "$$" "$1" >> "$MULLVAD_MOCK_LOG"
+fi

@@ -20,7 +20,8 @@ ln -s "$plugin_dir/test/mocks/mullvad-exclude" "$scratch/bin/mullvad-exclude"
 ln -s "$plugin_dir/test/mocks/ps" "$scratch/bin/ps"
 ln -s "$plugin_dir/test/mocks/pgrep" "$scratch/bin/pgrep"
 ln -s "$plugin_dir/test/mocks/checkupdates" "$scratch/bin/checkupdates"
-for executable in mullvad mullvad-exclude ps pgrep checkupdates; do
+ln -s "$plugin_dir/test/mocks/touch" "$scratch/bin/touch"
+for executable in mullvad mullvad-exclude ps pgrep checkupdates touch; do
   resolved="$(PATH="$scratch/bin" command -v "$executable")" || {
     echo "missing mock executable: $executable" >&2
     exit 1

@@ -46,7 +46,8 @@ run_case() {
   ln -s "$plugin_dir/test/mocks/ps" "$path_dir/ps"
   ln -s "$plugin_dir/test/mocks/pgrep" "$path_dir/pgrep"
   ln -s "$plugin_dir/test/mocks/checkupdates" "$path_dir/checkupdates"
-  for executable in mullvad mullvad-exclude ps pgrep checkupdates; do
+  ln -s "$plugin_dir/test/mocks/touch" "$path_dir/touch"
+  for executable in mullvad mullvad-exclude ps pgrep checkupdates touch; do
     local resolved
     resolved="$(PATH="$path_dir" command -v "$executable")" || {
       echo "missing mock executable: $executable" >&2
@@ -61,12 +62,18 @@ run_case() {
   MULLVAD_MOCK_MODE="$mode" MULLVAD_MOCK_LOG="$scratch/$name.mock" \
     MULLVAD_MOCK_LISTEN_SCRIPT="$listen_script" \
     MULLVAD_MOCK_STATUS_DELAY_TRIGGER="$scratch/$name.delay" \
+    MULLVAD_MOCK_AVAILABILITY_STATE="$scratch/$name.availability" \
+    MULLVAD_MOCK_AVAILABILITY_TRIGGER="$scratch/$name.availability-trigger" \
+    MULLVAD_MOCK_TOUCH_TARGET="$scratch/$name.availability-trigger" \
     MULLVAD_PACMAN_LOCAL_DB="$plugin_dir/test/fixtures/pacman-local" \
     MULLVAD_PROBE_SCENARIO="$scenario" MULLVAD_PLUGIN_DIR="$plugin_dir" \
     PATH="$path_dir:$PATH" timeout 20 qs -n -p "$probe_dir/service-probe.qml" \
     > "$scratch/$name.log" 2>&1
   local command_status=$?
-  "$probe_dir/collect-result" "$scratch/$name.log" "$command_status" "$scratch/$name.mock"
+  "$probe_dir/collect-result" "$scratch/$name.log" "$command_status" "$scratch/$name.mock" || {
+    cat "$scratch/$name.log" >&2
+    return 1
+  }
 }
 
 check_orphans() {
@@ -193,7 +200,7 @@ check_command "partial batch did not run a stale queued PID" bash -c '! grep -Fq
 check_command "service accepted a fixed-argv action after failure" grep -Fq 'ARGV: disconnect' "$scratch/partial-batch.mock"
 check_orphans partial-batch
 
-json="$(run_case availability-recovery ok availability-recovery)"
+json="$(run_case availability-recovery availability-recovery availability-recovery)"
 check_json "$json" "CLI and daemon disappearance clear readiness and recover" note empty ignored cliDisappeared eq true cliRecovered eq true daemonDisappeared eq true daemonRecovered eq true
 check_orphans availability-recovery
 

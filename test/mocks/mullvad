@@ -5,6 +5,17 @@ mock_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 fixtures="$mock_dir/../fixtures/cli"
 mode="${MULLVAD_MOCK_MODE:-ok}"
 
+next_count() {
+  local key="$1"
+  local path="${MULLVAD_MOCK_AVAILABILITY_STATE:-}.$key"
+  local count=0
+  [[ -n "${MULLVAD_MOCK_AVAILABILITY_STATE:-}" ]] || { printf '1'; return; }
+  [[ -r "$path" ]] && IFS= read -r count < "$path"
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$path"
+  printf '%s' "$count"
+}
+
 if [[ -n "${MULLVAD_MOCK_LOG:-}" ]]; then
   printf 'PID=%s MODE=%s ARGV: %s\n' "$$" "$mode" "$*" >> "$MULLVAD_MOCK_LOG"
 fi
@@ -41,9 +52,23 @@ if [[ "$mode" == fail && "$*" != --version ]]; then
 fi
 
 case "$*" in
-  --version) cat "$fixtures/version.txt" ;;
+  --version)
+    if [[ "$mode" == availability-recovery
+          && -e "${MULLVAD_MOCK_AVAILABILITY_TRIGGER:-/definitely/missing}"
+          && "$(next_count probe)" -eq 1 ]]; then
+      echo "mock CLI disappeared" >&2
+      exit 127
+    fi
+    cat "$fixtures/version.txt"
+    ;;
   version) printf 'Current version: 2026.4\nIs supported: true\nSuggested upgrade: none\n' ;;
   "status --json")
+    if [[ "$mode" == availability-recovery
+          && -e "${MULLVAD_MOCK_AVAILABILITY_TRIGGER:-/definitely/missing}"
+          && "$(next_count status)" -eq 1 ]]; then
+      echo "mock daemon unavailable" >&2
+      exit 1
+    fi
     if [[ -n "${MULLVAD_MOCK_STATUS_DELAY_TRIGGER:-}" && -e "$MULLVAD_MOCK_STATUS_DELAY_TRIGGER" ]]; then
       rm -f "$MULLVAD_MOCK_STATUS_DELAY_TRIGGER"
       sleep 1.2

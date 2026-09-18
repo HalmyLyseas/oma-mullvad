@@ -27,7 +27,7 @@ for (const runner of ["test/probe/run", "test/probe/run-ui"]) {
     });
     test(`${runner} verifies every executable mock before running`, () => {
         const source = readFileSync(join(root, runner), "utf8");
-        assert.match(source, /for executable in mullvad mullvad-exclude ps pgrep checkupdates/);
+        assert.match(source, /for executable in mullvad mullvad-exclude ps pgrep checkupdates touch/);
         assert.match(source, /command -v "\$executable"/);
         assert.match(source, /readlink -f.*test\/mocks\/\$executable/);
     });
@@ -36,4 +36,14 @@ for (const runner of ["test/probe/run", "test/probe/run-ui"]) {
 test("the excluded-application launcher mock is executable", () => {
     const path = join(root, "test/mocks/mullvad-exclude");
     assert.ok(statSync(path).mode & 0o111);
+});
+
+test("availability recovery crosses the mocked process boundary", () => {
+    const probe = readFileSync(join(root, "test/probe/service-probe.qml"), "utf8");
+    const scenario = probe.slice(probe.indexOf('scenario === "availability-recovery"'),
+        probe.indexOf('scenario === "listener-flood"'));
+    assert.match(scenario, /refreshAll\(\)/);
+    assert.doesNotMatch(scenario, /_applyRead/);
+    const mock = readFileSync(join(root, "test/mocks/mullvad"), "utf8");
+    assert.match(mock, /MULLVAD_MOCK_AVAILABILITY_TRIGGER/);
 });
