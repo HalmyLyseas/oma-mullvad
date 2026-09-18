@@ -16,7 +16,7 @@ The System/package-management page is intentionally deferred. This release has n
 
 A third-party `bar-widget` receives a scoped facade. `serviceFor("io.github.kallupx.oma-mullvad")` may resolve the plugin service; foreign service IDs must return `null`. The facade's `appLibrary` is `null` because the manifest does not declare `kind: "menu"`. The plugin does not traverse parent objects, private service registries, or replacement-bar internals to escape this boundary.
 
-Excluded-app discovery uses the public Quickshell `DesktopEntries` catalogue. Search and scoring are bounded pure functions in `Model.js`; standard `noDisplay` entries are filtered. Omarchy's private launcher-hide configuration is not available through the scoped facade. Empty search shows resolved recent desktop IDs, while a non-empty query searches the complete local catalogue. Launch execution remains the fixed argv returned by `Model.argv("launchExcluded", ...)`.
+Excluded-app discovery uses the public Quickshell `DesktopEntries` catalogue. Search scans at most 4,096 entries, caps keyword count at 64, and bounds every searchable field before concatenation. Standard `noDisplay` entries are filtered. Omarchy's private launcher-hide configuration is not available through the scoped facade. Empty search shows resolved recent desktop IDs, while a non-empty query searches the bounded local catalogue. Launch execution remains the fixed argv returned by `Model.argv("launchExcluded", ...)`; safe desktop IDs may contain spaces and parentheses, while path syntax and shell metacharacters remain rejected. The panel persists the recent ID and closes only when the service reports that dispatch succeeded.
 
 Settings persistence clones the current inline settings and replaces only favourites, recent locations, and recent excluded desktop IDs. This preserves unrelated values such as `refreshIntervalSec`.
 
@@ -44,10 +44,10 @@ The gate runs:
 2. `node --test tests/*.test.js` for pure model and sink checks.
 3. `node test/cli-contract.mjs`, which invokes only read-only Mullvad commands and skips only when the CLI is absent.
 4. `test/probe/run` for mocked process, timeout, output-limit, listener, race, and grouping behavior.
-5. `test/probe/run-ui` against the real `BarWidget.qml` and `Panel.qml` under a scoped 4.0.3-style facade.
+5. `test/probe/run-ui` against the real `BarWidget.qml` and `Panel.qml` under the selected Omarchy shell source.
 6. Node tests, QML lint, and manifest validation again from a clean archive of the proposed index.
 
-The probe suites mock all VPN-changing commands and must not mutate the live daemon. CI runs the same tracked suites in an Arch container with the Omarchy shell API extracted for linting and headless QML probes.
+The probe suites mock all VPN-changing commands and must not mutate the live daemon. CI clones exact Omarchy `v4.0.3` and `v4.0.4` tags and runs the gate once against each tag's `shell/` and `bin/omarchy-plugin-validate`. Local validation defaults to `/usr/share/omarchy/shell` and the installed `omarchy-plugin-validate`; set `OMARCHY_SHELL_DIR` and `OMARCHY_PLUGIN_VALIDATOR` to test other source trees.
 
 ## Release discipline
 

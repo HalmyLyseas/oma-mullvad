@@ -18,6 +18,8 @@ bash test/ci-local --no-cage
 
 QML service changes require `omarchy restart shell` when testing an installed copy; plugin hot reload does not replace a `keepLoaded` service reliably. Installed testing is separate from source-tree validation and must be explicitly requested.
 
+`test/ci-local` uses the installed `/usr/share/omarchy/shell` and `omarchy-plugin-validate` by default. For compatibility checks, set `OMARCHY_SHELL_DIR` and `OMARCHY_PLUGIN_VALIDATOR` to an exact Omarchy source checkout.
+
 ## Publication
 
 Keep source commits, installed deployment, pushing, tagging, and releasing as separate steps. Publish only an exact reviewed commit, verify the remote full SHA, and require successful GitHub Actions before tagging or requesting marketplace verification.
