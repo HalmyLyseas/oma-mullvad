@@ -40,11 +40,8 @@ run_case() {
     MULLVAD_UI_SCENARIO="$scenario" MULLVAD_PLUGIN_DIR="$plugin_dir" \
     QML_IMPORT_PATH="$scratch/qmlroot" PATH="$scratch/bin:$PATH" \
     timeout 20 qs -n -p "$probe_dir/ui-probe.qml" > "$log" 2>&1
-  if rg -n 'TypeError|ReferenceError|^\s*ERROR:' "$log" >/dev/null; then
-    sed -n '1,240p' "$log" >&2
-    return 1
-  fi
-  grep -o 'PROBE_RESULT .*' "$log" | tail -n1 | sed 's/^PROBE_RESULT //'
+  local command_status=$?
+  "$probe_dir/collect-result" "$log" "$command_status" "$mocklog"
 }
 
 json="$(run_case state-icons)"

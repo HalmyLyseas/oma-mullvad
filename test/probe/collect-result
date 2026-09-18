@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+[[ $# -ge 2 && $# -le 3 ]] || { echo "usage: collect-result LOG EXIT_STATUS [MOCK_LOG]" >&2; exit 2; }
+exec node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/collect-result.mjs" "$@"

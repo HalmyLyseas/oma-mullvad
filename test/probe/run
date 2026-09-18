@@ -54,7 +54,8 @@ run_case() {
     MULLVAD_PROBE_SCENARIO="$scenario" MULLVAD_PLUGIN_DIR="$plugin_dir" \
     PATH="$path_dir:$PATH" timeout 20 qs -n -p "$probe_dir/service-probe.qml" \
     > "$scratch/$name.log" 2>&1
-  grep -o 'PROBE_RESULT .*' "$scratch/$name.log" | tail -n1 | sed 's/^PROBE_RESULT //'
+  local command_status=$?
+  "$probe_dir/collect-result" "$scratch/$name.log" "$command_status" "$scratch/$name.mock"
 }
 
 check_orphans() {
