@@ -47,9 +47,9 @@ rm "$scratch/qmlroot/qs/Ui/Panel.qml" "$scratch/qmlroot/qs/Ui/KeyboardPanel.qml"
 ln -s "$quicktest_dir/host/Panel.qml" "$scratch/qmlroot/qs/Ui/Panel.qml" || exit 1
 ln -s "$quicktest_dir/host/KeyboardPanel.qml" "$scratch/qmlroot/qs/Ui/KeyboardPanel.qml" || exit 1
 for executable in mullvad mullvad-exclude ps pgrep checkupdates touch; do
-  ln -s "$plugin_dir/test/mocks/$executable" "$scratch/bin/$executable" || exit 1
+  ln -s "$plugin_dir/tests/mocks/$executable" "$scratch/bin/$executable" || exit 1
   resolved="$(PATH="$scratch/bin" command -v "$executable")" || exit 1
-  [[ "$(readlink -f "$resolved")" == "$(readlink -f "$plugin_dir/test/mocks/$executable")" ]] || {
+  [[ "$(readlink -f "$resolved")" == "$(readlink -f "$plugin_dir/tests/mocks/$executable")" ]] || {
     echo "unsafe executable boundary: $executable -> $resolved" >&2
     exit 1
   }

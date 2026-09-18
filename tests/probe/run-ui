@@ -20,12 +20,12 @@ fi
 
 mkdir -p "$scratch/qmlroot" "$scratch/bin"
 ln -s "$omarchy_shell_dir" "$scratch/qmlroot/qs"
-ln -s "$plugin_dir/test/mocks/mullvad" "$scratch/bin/mullvad"
-ln -s "$plugin_dir/test/mocks/mullvad-exclude" "$scratch/bin/mullvad-exclude"
-ln -s "$plugin_dir/test/mocks/ps" "$scratch/bin/ps"
-ln -s "$plugin_dir/test/mocks/pgrep" "$scratch/bin/pgrep"
-ln -s "$plugin_dir/test/mocks/checkupdates" "$scratch/bin/checkupdates"
-ln -s "$plugin_dir/test/mocks/touch" "$scratch/bin/touch"
+ln -s "$plugin_dir/tests/mocks/mullvad" "$scratch/bin/mullvad"
+ln -s "$plugin_dir/tests/mocks/mullvad-exclude" "$scratch/bin/mullvad-exclude"
+ln -s "$plugin_dir/tests/mocks/ps" "$scratch/bin/ps"
+ln -s "$plugin_dir/tests/mocks/pgrep" "$scratch/bin/pgrep"
+ln -s "$plugin_dir/tests/mocks/checkupdates" "$scratch/bin/checkupdates"
+ln -s "$plugin_dir/tests/mocks/touch" "$scratch/bin/touch"
 for executable in bash dirname readlink sleep head tr cat rm awk date mktemp setsid timeout; do
   helper="$(PATH="$trusted_system_path" command -v "$executable" || true)"
   [[ -n "$helper" ]] || { echo "required isolated helper missing: $executable" >&2; exit 1; }
@@ -37,7 +37,7 @@ for executable in mullvad mullvad-exclude ps pgrep checkupdates touch; do
     echo "missing mock executable: $executable" >&2
     exit 1
   }
-  [[ "$(readlink -f "$resolved")" == "$(readlink -f "$plugin_dir/test/mocks/$executable")" ]] || {
+  [[ "$(readlink -f "$resolved")" == "$(readlink -f "$plugin_dir/tests/mocks/$executable")" ]] || {
     echo "unsafe executable boundary: $executable -> $resolved" >&2
     exit 1
   }
@@ -60,7 +60,7 @@ run_case() {
   [[ "$scenario" == interactive-controls ]] && mode=ui-reject
   : > "$mocklog"
   MULLVAD_MOCK_MODE="$mode" MULLVAD_MOCK_LOG="$mocklog" \
-    MULLVAD_PACMAN_LOCAL_DB="$plugin_dir/test/fixtures/pacman-local" \
+    MULLVAD_PACMAN_LOCAL_DB="$plugin_dir/tests/fixtures/pacman-local" \
     MULLVAD_UI_SCENARIO="$scenario" MULLVAD_PLUGIN_DIR="$plugin_dir" \
     QML_IMPORT_PATH="$scratch/qmlroot" PATH="$scratch/bin" \
     "$timeout_bin" 20 "$qs_bin" -n -p "$probe_dir/ui-probe.qml" > "$log" 2>&1

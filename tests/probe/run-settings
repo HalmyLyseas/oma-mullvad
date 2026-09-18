@@ -24,8 +24,8 @@ mkdir -p "$scratch/home/.config/omarchy/plugins" "$scratch/home/.cache" \
 ln -s "$omarchy_shell_dir" "$scratch/qmlroot/qs"
 ln -s "$plugin_dir" "$scratch/home/.config/omarchy/plugins/halmylyseas.oma-mullvad"
 for executable in mullvad mullvad-exclude ps pgrep checkupdates touch; do
-  ln -s "$plugin_dir/test/mocks/$executable" "$scratch/empty-bin/$executable"
-  [[ "$(readlink -f "$scratch/empty-bin/$executable")" == "$(readlink -f "$plugin_dir/test/mocks/$executable")" ]] || exit 1
+  ln -s "$plugin_dir/tests/mocks/$executable" "$scratch/empty-bin/$executable"
+  [[ "$(readlink -f "$scratch/empty-bin/$executable")" == "$(readlink -f "$plugin_dir/tests/mocks/$executable")" ]] || exit 1
 done
 for executable in bash dirname readlink sleep head tr cat find sort mkdir rm awk date mktemp setsid timeout; do
   helper="$(PATH="$trusted_system_path" command -v "$executable" || true)"
@@ -46,7 +46,7 @@ HOME="$scratch/home" XDG_CONFIG_HOME="$scratch/home/.config" \
   XDG_STATE_HOME="$scratch/home/.local/state" OMARCHY_PATH="$scratch/omarchy" \
   OMARCHY_SHELL_DIR="$omarchy_shell_dir" MULLVAD_PLUGIN_MANIFEST="$plugin_dir/manifest.json" \
   MULLVAD_MOCK_MODE=ok MULLVAD_MOCK_LOG="$scratch/mock.log" \
-  MULLVAD_PACMAN_LOCAL_DB="$plugin_dir/test/fixtures/pacman-local" \
+  MULLVAD_PACMAN_LOCAL_DB="$plugin_dir/tests/fixtures/pacman-local" \
   QML_IMPORT_PATH="$scratch/qmlroot" PATH="$scratch/empty-bin" \
   "$timeout_bin" 20 "$qs_bin" -n -p "$probe_dir/scoped-settings-probe.qml" > "$log" 2>&1
 command_status=$?

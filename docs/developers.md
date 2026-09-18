@@ -59,20 +59,20 @@ Tab focuses a trigger; Enter/Space opens it. In the plain dropdown, j/k or Up/Do
 Run the complete local gate from the repository root:
 
 ```bash
-bash test/ci-local
+bash tests/ci-local
 ```
 
-Use `bash test/ci-local --no-cage` only as a live-session fallback when Cage cannot be used.
+Use `bash tests/ci-local --no-cage` only as a live-session fallback when Cage cannot be used.
 
 The gate runs:
 
 1. QML lint and manifest validation.
 2. `node --test tests/*.test.js` for pure model and sink checks.
-3. `test/run-cli-contract`, which runs the read-only CLI contract against an inert test-local `mullvad` mock and verifies its exact argv inventory.
-4. `test/probe/run` for mocked process, timeout, output-limit, listener, race, grouping, package metadata, and isolated read-only update-check behavior.
-5. `test/probe/run-ui` against the real `BarWidget.qml` and `Panel.qml`, including System availability without the CLI or daemon, under the selected Omarchy shell source.
-6. `test/quicktest/run`, which drives real `QtTest.TestCase` keyboard and pointer events through Panel routing, both dropdowns, confirmation dialogs, and WorldMap markers under the Cage gate.
-7. `test/probe/run-settings` against the current scoped host facade and an isolated `shell.json`.
+3. `tests/run-cli-contract`, which runs the read-only CLI contract against an inert test-local `mullvad` mock and verifies its exact argv inventory.
+4. `tests/probe/run` for mocked process, timeout, output-limit, listener, race, grouping, package metadata, and isolated read-only update-check behavior.
+5. `tests/probe/run-ui` against the real `BarWidget.qml` and `Panel.qml`, including System availability without the CLI or daemon, under the selected Omarchy shell source.
+6. `tests/quicktest/run`, which drives real `QtTest.TestCase` keyboard and pointer events through Panel routing, both dropdowns, confirmation dialogs, and WorldMap markers under the Cage gate.
+7. `tests/probe/run-settings` against the current scoped host facade and an isolated `shell.json`.
 8. Node tests, runner/mock syntax, QML lint, and manifest validation again from a clean archive of the proposed index.
 
 The physical-input suite requires `qmltestrunner`, provided on Arch by `qt6-declarative` at `/usr/lib/qt6/bin/qmltestrunner`. The runner first accepts `command -v qmltestrunner`, then checks that explicit Arch path, and fails closed when neither is available.

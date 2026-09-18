@@ -4,7 +4,7 @@ set -uo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 use_cage=1
 [[ "${1:-}" == --no-cage ]] && use_cage=0
-[[ $# -le 1 ]] || { echo "usage: test/ci-local [--no-cage]" >&2; exit 2; }
+[[ $# -le 1 ]] || { echo "usage: tests/ci-local [--no-cage]" >&2; exit 2; }
 omarchy_shell_dir="${OMARCHY_SHELL_DIR:-/usr/share/omarchy/shell}"
 omarchy_plugin_validator="${OMARCHY_PLUGIN_VALIDATOR:-$(command -v omarchy-plugin-validate || true)}"
 [[ -d "$omarchy_shell_dir" ]] || { echo "Omarchy shell not found: $omarchy_shell_dir" >&2; exit 1; }
@@ -45,16 +45,16 @@ clean_archive() {
       return 1
     fi
     bash -n "$archive_dir/$file" || return 1
-  done < <(git -C "$root" ls-files -z 'test/probe/run*' 'test/probe/collect-result' 'test/quicktest/run' 'test/mocks/*' 'test/all' 'test/ci-local' 'test/run-cli-contract')
-  [[ -f "$archive_dir/test/quicktest/tst_physical_input.qml" ]] || {
-    echo "clean archive missing test/quicktest/tst_physical_input.qml" >&2
+  done < <(git -C "$root" ls-files -z 'tests/probe/run*' 'tests/probe/collect-result' 'tests/quicktest/run' 'tests/mocks/*' 'tests/all' 'tests/ci-local' 'tests/run-cli-contract')
+  [[ -f "$archive_dir/tests/quicktest/tst_physical_input.qml" ]] || {
+    echo "clean archive missing tests/quicktest/tst_physical_input.qml" >&2
     return 1
   }
-  bash -n "$archive_dir/test/quicktest/run" || return 1
+  bash -n "$archive_dir/tests/quicktest/run" || return 1
   command -v qs >/dev/null || { echo "clean archive requires qs" >&2; return 1; }
-  node --check "$archive_dir/test/probe/collect-result.mjs" || return 1
-  node --check "$archive_dir/test/cli-contract.mjs" || return 1
-  node --check "$archive_dir/test/verify-cli-contract-log.mjs" || return 1
+  node --check "$archive_dir/tests/probe/collect-result.mjs" || return 1
+  node --check "$archive_dir/tests/cli-contract.mjs" || return 1
+  node --check "$archive_dir/tests/verify-cli-contract-log.mjs" || return 1
   node --test "$archive_dir/tests"/*.test.js || return 1
   lint_tree "$archive_dir" || return 1
   "$omarchy_plugin_validator" "$archive_dir" || return 1
@@ -64,7 +64,7 @@ run_step lint_tree "$root"
 run_step "$omarchy_plugin_validator" "$root"
 
 if [[ "$use_cage" -eq 0 ]]; then
-  run_step bash "$root/test/all"
+  run_step bash "$root/tests/all"
 else
   command -v cage >/dev/null || {
     echo "cage is required; use --no-cage for the current session" >&2
@@ -75,14 +75,14 @@ else
   export QT_QUICK_BACKEND=software
   mkdir -p "$XDG_RUNTIME_DIR"
   chmod 700 "$XDG_RUNTIME_DIR"
-  run_step cage -- bash "$root/test/all"
+  run_step cage -- bash "$root/tests/all"
 fi
 
 run_step clean_archive
 
 if [[ "$status" -eq 0 ]]; then
-  echo "test/ci-local: ALL SUITES PASSED"
+  echo "tests/ci-local: ALL SUITES PASSED"
 else
-  echo "test/ci-local: FAILURES ABOVE"
+  echo "tests/ci-local: FAILURES ABOVE"
 fi
 exit "$status"

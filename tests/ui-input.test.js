@@ -14,7 +14,7 @@ test("application icons decode asynchronously at a fixed size", () => {
 });
 
 test("interactive UI probe uses honest rendered handler boundaries", () => {
-    const probe = readFileSync(join(root, "test/probe/ui-probe.qml"), "utf8");
+    const probe = readFileSync(join(root, "tests/probe/ui-probe.qml"), "utf8");
     const scenario = probe.slice(probe.indexOf('scenario === "interactive-controls"'),
         probe.indexOf('scenario === "excluded-groups"'));
     assert.doesNotMatch(probe, /import QtTest/);
@@ -34,7 +34,7 @@ test("dropdown test boundary focuses the rendered trigger without emitting outpu
 });
 
 test("UI gate labels component-boundary coverage as complementary", () => {
-    const runner = readFileSync(join(root, "test/probe/run-ui"), "utf8");
+    const runner = readFileSync(join(root, "tests/probe/run-ui"), "utf8");
     assert.match(runner, /real map component projects the selected relay target/);
     assert.match(runner, /complements Qt Quick physical input/);
     assert.doesNotMatch(runner, /lacks a physical event injector/);
@@ -42,7 +42,7 @@ test("UI gate labels component-boundary coverage as complementary", () => {
 });
 
 test("dedicated Qt Quick Tests use genuine keyboard and pointer injection", () => {
-    const source = readFileSync(join(root, "test/quicktest/tst_physical_input.qml"), "utf8");
+    const source = readFileSync(join(root, "tests/quicktest/tst_physical_input.qml"), "utf8");
     assert.match(source, /import QtTest/);
     assert.match(source, /keyClick\(/);
     assert.match(source, /mouseClick\(/);
@@ -50,7 +50,7 @@ test("dedicated Qt Quick Tests use genuine keyboard and pointer injection", () =
 });
 
 test("physical suite covers panel routing, dropdowns, dialogs, and map payloads", () => {
-    const source = readFileSync(join(root, "test/quicktest/tst_physical_input.qml"), "utf8");
+    const source = readFileSync(join(root, "tests/quicktest/tst_physical_input.qml"), "utf8");
     for (const name of ["panel_keyboard", "dropdown_keyboard", "dropdown_pointer",
         "searchable_keyboard", "searchable_pointer", "dialog_keyboard",
         "dialog_pointer", "world_map_pointer"])

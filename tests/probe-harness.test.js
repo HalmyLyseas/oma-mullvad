@@ -6,7 +6,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const root = join(__dirname, "..");
-const collector = join(root, "test/probe/collect-result");
+const collector = join(root, "tests/probe/collect-result");
 
 function collect(log, status = 0) {
     const scratch = mkdtempSync(join(tmpdir(), "oma-mullvad-probe-result-"));
@@ -55,7 +55,7 @@ for (const [name, log, status] of [
 }
 
 test("probe runners preserve the command status and use fail-closed collection", () => {
-    for (const runner of ["test/probe/run", "test/probe/run-ui"]) {
+    for (const runner of ["tests/probe/run", "tests/probe/run-ui"]) {
         const source = readFileSync(join(root, runner), "utf8");
         assert.match(source, /command_status=\$\?/);
         assert.match(source, /collect-result/);

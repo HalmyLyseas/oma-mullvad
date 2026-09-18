@@ -6,8 +6,8 @@ const assert = require("node:assert/strict");
 const root = join(__dirname, "..");
 
 test("scoped settings probe uses the real host facade and isolated shell.json", () => {
-    const runner = readFileSync(join(root, "test/probe/run-settings"), "utf8");
-    const probe = readFileSync(join(root, "test/probe/scoped-settings-probe.qml"), "utf8");
+    const runner = readFileSync(join(root, "tests/probe/run-settings"), "utf8");
+    const probe = readFileSync(join(root, "tests/probe/scoped-settings-probe.qml"), "utf8");
     assert.match(runner, /HOME="\$scratch\/home"/);
     assert.match(runner, /OMARCHY_PATH="\$scratch\/omarchy"/);
     assert.match(runner, /PATH="\$scratch\/empty-bin"/);
@@ -26,6 +26,6 @@ test("scoped settings probe uses the real host facade and isolated shell.json", 
 });
 
 test("all probe inventory includes scoped settings", () => {
-    const all = readFileSync(join(root, "test/all"), "utf8");
-    assert.match(all, /test\/probe\/run-settings/);
+    const all = readFileSync(join(root, "tests/all"), "utf8");
+    assert.match(all, /tests\/probe\/run-settings/);
 });

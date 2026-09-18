@@ -5,8 +5,8 @@ const assert = require("node:assert/strict");
 
 const root = join(__dirname, "..");
 const workflow = readFileSync(join(root, ".github/workflows/test.yml"), "utf8");
-const ciLocal = readFileSync(join(root, "test/ci-local"), "utf8");
-const uiRunner = readFileSync(join(root, "test/probe/run-ui"), "utf8");
+const ciLocal = readFileSync(join(root, "tests/ci-local"), "utf8");
+const uiRunner = readFileSync(join(root, "tests/probe/run-ui"), "utf8");
 
 test("CI validates exact Omarchy 4.0.3 and 4.0.4 tags", () => {
     assert.match(workflow, /matrix:[\s\S]*omarchy:[^\n]*v4\.0\.3[^\n]*v4\.0\.4/);

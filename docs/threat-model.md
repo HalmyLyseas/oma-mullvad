@@ -33,4 +33,4 @@ Scope: `halmylyseas.oma-mullvad`, an Omarchy shell plugin using the local Mullva
 
 ## Validation boundary
 
-`bash test/ci-local` runs lint, manifest validation, model/security tests, mocked CLI contracts, Cage-backed service/UI/physical-input/settings probes, and proposed-index archive checks. VPN mutations, application launches, process lookups, and network update checks are mocked. Tests do not install packages, control the real daemon, change installed plugins, or write under `/usr/share/omarchy/`. Disposable CI dependency installation is separate from the installed plugin's capabilities.
+`bash tests/ci-local` runs lint, manifest validation, model/security tests, mocked CLI contracts, Cage-backed service/UI/physical-input/settings probes, and proposed-index archive checks. VPN mutations, application launches, process lookups, and network update checks are mocked. Tests do not install packages, control the real daemon, change installed plugins, or write under `/usr/share/omarchy/`. Disposable CI dependency installation is separate from the installed plugin's capabilities.

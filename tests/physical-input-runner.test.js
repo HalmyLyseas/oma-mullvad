@@ -10,31 +10,31 @@ function source(path) {
 }
 
 test("physical Qt Quick Test runner resolves the Arch binary and fails closed", () => {
-    const runner = source("test/quicktest/run");
+    const runner = source("tests/quicktest/run");
     assert.match(runner, /command -v qmltestrunner/);
     assert.match(runner, /\/usr\/lib\/qt6\/bin\/qmltestrunner/);
     assert.match(runner, /requires qmltestrunner/);
-    assert.ok(statSync(join(root, "test/quicktest/run")).mode & 0o111);
+    assert.ok(statSync(join(root, "tests/quicktest/run")).mode & 0o111);
 });
 
 test("physical Qt Quick Test runner keeps a verified allowlisted PATH", () => {
-    const runner = source("test/quicktest/run");
+    const runner = source("tests/quicktest/run");
     assert.match(runner, /trusted_system_path='?\/usr\/bin:\/bin'?/);
     assert.doesNotMatch(runner, /PATH="\$[^"\n]*:\$PATH"/);
     assert.match(runner, /readlink -f/);
-    assert.match(runner, /plugin_dir\/test\/mocks\/\$executable/);
+    assert.match(runner, /plugin_dir\/tests\/mocks\/\$executable/);
     assert.match(runner, /env -i/);
     assert.doesNotMatch(runner, /LD_PRELOAD|LD_LIBRARY_PATH|QT_PLUGIN_PATH|QML2_IMPORT_PATH/);
 });
 
 test("physical Qt Quick Test runner preserves an inherited Wayland socket", () => {
-    const runner = source("test/quicktest/run");
+    const runner = source("tests/quicktest/run");
     assert.match(runner, /WAYLAND_DISPLAY/);
     assert.match(runner, /XDG_RUNTIME_DIR[^\n]*WAYLAND_DISPLAY|WAYLAND_DISPLAY[^\n]*XDG_RUNTIME_DIR/);
 });
 
 test("physical Qt Quick Test runner bounds diagnostics and rejects timeout or failure", () => {
-    const runner = source("test/quicktest/run");
+    const runner = source("tests/quicktest/run");
     assert.match(runner, /command_status=\$\?/);
     assert.match(runner, /head -c 65536/);
     assert.match(runner, /--kill-after/);
@@ -49,11 +49,11 @@ test("physical Qt Quick Test runner bounds diagnostics and rejects timeout or fa
 });
 
 test("the main and clean-archive gates inventory physical Qt Quick Tests", () => {
-    assert.match(source("test/all"), /test\/quicktest\/run/);
-    const gate = source("test/ci-local");
-    assert.match(gate, /test\/quicktest\/run/);
-    assert.match(gate, /test\/quicktest\/tst_physical_input\.qml/);
-    assert.match(gate, /archive_dir\/test\/quicktest\/run/);
+    assert.match(source("tests/all"), /tests\/quicktest\/run/);
+    const gate = source("tests/ci-local");
+    assert.match(gate, /tests\/quicktest\/run/);
+    assert.match(gate, /tests\/quicktest\/tst_physical_input\.qml/);
+    assert.match(gate, /archive_dir\/tests\/quicktest\/run/);
 });
 
 test("CI installs the Arch qmltestrunner provider for both exact Omarchy versions", () => {

@@ -15,14 +15,14 @@ Keep code comment blocks to at most two lines; put longer explanations in `docs/
 Use tests first for behavior changes: add a focused failing test, confirm the expected failure, implement the minimum change, then run the relevant suite. Before committing, run:
 
 ```bash
-bash test/ci-local
+bash tests/ci-local
 ```
 
-Use `bash test/ci-local --no-cage` only as a live-session fallback when Cage cannot be used.
+Use `bash tests/ci-local --no-cage` only as a live-session fallback when Cage cannot be used.
 
 QML service changes require `omarchy restart shell` when testing an installed copy; plugin hot reload does not replace a `keepLoaded` service reliably. Installed testing is separate from source-tree validation and must be explicitly requested.
 
-`test/ci-local` uses the installed `/usr/share/omarchy/shell` and `omarchy-plugin-validate` by default. For compatibility checks, set `OMARCHY_SHELL_DIR` and `OMARCHY_PLUGIN_VALIDATOR` to an exact Omarchy source checkout.
+`tests/ci-local` uses the installed `/usr/share/omarchy/shell` and `omarchy-plugin-validate` by default. For compatibility checks, set `OMARCHY_SHELL_DIR` and `OMARCHY_PLUGIN_VALIDATOR` to an exact Omarchy source checkout.
 
 ## Publication
 

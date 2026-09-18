@@ -12,7 +12,7 @@ function contract(snapshot, mode = "cli-contract") {
     try {
         const fixture = join(scratch, "status.json");
         writeFileSync(fixture, snapshot);
-        return spawnSync("/bin/bash", [join(root, "test/run-cli-contract")], {
+        return spawnSync("/bin/bash", [join(root, "tests/run-cli-contract")], {
             encoding: "utf8", timeout: 30000,
             env: { ...process.env, MULLVAD_MOCK_MODE: mode, MULLVAD_MOCK_STATUS_FIXTURE: fixture }
         });

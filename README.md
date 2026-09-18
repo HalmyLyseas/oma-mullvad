@@ -67,10 +67,10 @@ Account numbers are sent to `mullvad account login` over standard input and are 
 Run the complete non-disruptive local gate:
 
 ```bash
-bash test/ci-local
+bash tests/ci-local
 ```
 
-Use `bash test/ci-local --no-cage` only as a fallback for an existing live session when Cage cannot be used.
+Use `bash tests/ci-local --no-cage` only as a fallback for an existing live session when Cage cannot be used.
 
 The CLI contract and every VPN-changing operation run against inert test-local mocks; automated suites never invoke the live Mullvad CLI.
 
