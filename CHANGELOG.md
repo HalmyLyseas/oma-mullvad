@@ -1,12 +1,13 @@
 # Changelog
 
-## 1.5-rc
+## 1.5.0
 
 - Adopt `halmylyseas.oma-mullvad` as the maintained fork identity and `HalmyLyseas` as manifest author; retain original MIT attribution.
 - Require an explicit switch from the old plugin ID; update installation and IPC examples for this repository.
 - Expand isolated service, scoped-settings, recovery, and Qt Quick input coverage under Cage.
 - Simplify command construction, private output buffers, DNS dispatch and excluded-app search without weakening safety limits.
 - Keep code comment blocks to two lines maximum, with longer explanations in developer documentation.
+- Consolidate runners, mocks, fixtures and regression tests under `tests/`; refresh plugin previews.
 
 ## 1.4.6
 

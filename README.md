@@ -26,7 +26,7 @@ OmaMullvad targets Mullvad VPN 2026.4. Install and enable Mullvad VPN separately
 
 ## Upgrading from the upstream identity
 
-Version `1.5-rc` uses the distinct plugin ID `halmylyseas.oma-mullvad`. It does not automatically migrate an installation of `io.github.kallupx.oma-mullvad`. Back up `~/.config/omarchy/shell.json` before switching, preserve the old widget's favourites, recent items and refresh interval, and disable the old widget before enabling this fork. Custom IPC keybindings must use the new ID.
+Version `1.5.0` uses the distinct plugin ID `halmylyseas.oma-mullvad`. It does not automatically migrate an installation of `io.github.kallupx.oma-mullvad`. Back up `~/.config/omarchy/shell.json` before switching, preserve the old widget's favourites, recent items and refresh interval, and disable the old widget before enabling this fork. Custom IPC keybindings must use the new ID.
 
 ## Controls
 
