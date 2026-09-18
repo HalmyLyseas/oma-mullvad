@@ -10,6 +10,7 @@ ShellRoot {
   property bool finished: false
   property int reloadPhase: 0
   property var originalService: null
+  property var interactionValues: null
 
   QtObject {
     id: shell
@@ -236,6 +237,77 @@ ShellRoot {
       launchResultWait.rejected = rejected
       launchResultWait.failurePreserved = failurePreserved
       launchResultWait.start()
+    } else if (scenario === "settings-fresh-merge") {
+      var settingsPanel = widget._probePanelItem
+      widget.settings = ({ refreshIntervalSec: 99, siblingValue: "preserve-me",
+                           favoriteLocations: [], recentLocations: [], recentExcludedApps: [] })
+      settingsPanel.settings = ({ refreshIntervalSec: 30, siblingValue: "stale",
+                                  favoriteLocations: [], recentLocations: [], recentExcludedApps: [] })
+      settingsPanel.toggleFavorite({ countryCode: "se", cityCode: "got", country: "Sweden", city: "Gothenburg" })
+      finish("", {
+        refreshIntervalSec: shell.lastUpdatePayload ? shell.lastUpdatePayload.refreshIntervalSec : 0,
+        siblingValue: shell.lastUpdatePayload ? String(shell.lastUpdatePayload.siblingValue || "") : "",
+        favoriteCount: shell.lastUpdatePayload && shell.lastUpdatePayload.favoriteLocations
+          ? shell.lastUpdatePayload.favoriteLocations.length : 0
+      })
+    } else if (scenario === "interactive-controls") {
+      var controlsPanel = widget._probePanelItem
+      service.installed = true
+      service.daemonRunning = true
+      service.locations = [{
+        countryCode: "se", cityCode: "got", country: "Sweden", city: "Gothenburg",
+        latitude: 57.7, longitude: 11.9,
+        servers: [{ hostname: "se-got-wg-001", provider: "Example", ownership: "owned",
+                    ipv4: "192.0.2.1", ipv6: "2001:db8::1", active: true }]
+      }]
+      service.relayConstraints = {
+        location: { type: "city", countryCode: "se", cityCode: "got" },
+        providers: [], ownership: "any", ipVersion: "any", multihop: false, entry: {}
+      }
+      controlsPanel.showPage(1)
+      var locations = controlsPanel.locationOptions()
+      var servers = controlsPanel.serverOptions(service.locations[0])
+      controlsPanel.toggleFavorite(service.locations[0])
+      controlsPanel.recordRecent(service.locations[0])
+      controlsPanel.movePage(1)
+      var tabsWorked = controlsPanel.pageIndex === 2 && controlsPanel._probePageItem !== null
+
+      var accountRan = false
+      controlsPanel.confirmAction("Account action?", function() { accountRan = true })
+      controlsPanel.pendingConfirmation = null
+      var removalRan = false
+      controlsPanel.confirmAction("Removal action?", function() { removalRan = true })
+      controlsPanel.pendingConfirmation = null
+
+      var dropdownComponent = Qt.createComponent("file://" + root.pluginDir + "/OmaDropdown.qml")
+      var dropdown = dropdownComponent.createObject(root, {
+        options: [{ value: "got", label: "Gothenburg" }], value: "got"
+      })
+      var searchableComponent = Qt.createComponent("file://" + root.pluginDir + "/OmaSearchableDropdown.qml")
+      var searchable = searchableComponent.createObject(root, {
+        options: [{ value: "se", label: "Sweden", description: "Gothenburg Example" }], value: "se"
+      })
+      var mapComponent = Qt.createComponent("file://" + root.pluginDir + "/WorldMap.qml")
+      var map = mapComponent.createObject(root, { width: 360, height: 180 })
+
+      service.disconnectTunnel()
+      var busyBlocks = controlsPanel.chooseLocation(service.locations[0], false) === false
+      interactionValues = {
+        tabsWorked: tabsWorked, locationCount: locations.length, serverCount: servers.length,
+        favoriteCount: controlsPanel.favoriteLocations.length,
+        recentCount: controlsPanel.recentLocations.length,
+        mapProjection: map && map.pointX(service.locations[0]) > 0 && map.pointY(service.locations[0]) > 0,
+        filtersVisible: controlsPanel.pageIndex === 2,
+        dropdownLabel: dropdown ? dropdown.currentLabel() : "",
+        searchableLabel: searchable ? searchable.currentLabel() : "",
+        busyBlocksLocation: busyBlocks,
+        accountCanceled: !accountRan,
+        removalCanceled: !removalRan
+      }
+      if (dropdown) dropdown.destroy()
+      if (searchable) searchable.destroy()
+      if (map) map.destroy()
+      interactionWait.start()
     } else if (scenario === "excluded-groups") {
       var excludedPanel = widget._probePanelItem
       service.installed = true
@@ -254,6 +326,20 @@ ShellRoot {
         })
       })
     } else finish("unknown scenario")
+  }
+
+  Timer {
+    id: interactionWait
+    property int elapsed: 0
+    interval: 50
+    repeat: true
+    onTriggered: {
+      elapsed += interval
+      if (!root.service.busy && root.service._readQueue.length === 0 && root.service._readKind === "") {
+        stop()
+        root.finish("", root.interactionValues)
+      } else if (elapsed > 5000) root.finish("interactive controls did not drain")
+    }
   }
 
   Timer {

@@ -93,7 +93,8 @@ Panel {
       recentApps === undefined ? recentExcludedApps : recentApps))
     if (!bar || !bar.shell || typeof bar.shell.updateEntryInline !== "function") return
     var entry = { id: moduleName }
-    for (var key in settings) if (key !== "id") entry[key] = settings[key]
+    var currentSettings = hostWidget && hostWidget.settings ? hostWidget.settings : settings
+    for (var key in currentSettings) if (key !== "id") entry[key] = currentSettings[key]
     entry.favoriteLocations = favoriteLocations
     entry.recentLocations = recentLocations
     entry.recentExcludedApps = recentExcludedApps

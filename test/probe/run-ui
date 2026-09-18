@@ -115,4 +115,12 @@ else
   failures=$((failures + 1))
 fi
 
+json="$(run_case settings-fresh-merge)"
+check_json "$json" "stale panel writes merge the current scoped-host entry" note empty ignored refreshIntervalSec eq 99 siblingValue eq preserve-me favoriteCount eq 1
+
+json="$(run_case interactive-controls)"
+check_json "$json" "real panel drives tabs, locations, favorites, recents, map, and filters" note empty ignored tabsWorked eq true locationCount gt 0 serverCount gt 0 favoriteCount eq 1 recentCount eq 1 mapProjection eq true filtersVisible eq true
+check_json "$json" "local dropdown controls retain bound values and plain labels" dropdownLabel eq Gothenburg searchableLabel eq Sweden
+check_json "$json" "busy and confirmation paths keep actions explicit" busyBlocksLocation eq true accountCanceled eq true removalCanceled eq true
+
 exit "$((failures > 0))"

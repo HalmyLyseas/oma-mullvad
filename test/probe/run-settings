@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+probe_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+omarchy_shell_dir="${OMARCHY_SHELL_DIR:-/usr/share/omarchy/shell}"
+scratch="$(mktemp -d)"
+trap 'rm -rf "$scratch"' EXIT
+
+if ! command -v qs >/dev/null 2>&1; then
+  echo "scoped settings probe skipped: qs is unavailable"
+  exit 0
+fi
+
+mkdir -p "$scratch/qmlroot"
+ln -s "$omarchy_shell_dir" "$scratch/qmlroot/qs"
+shell_json="$scratch/shell.json"
+printf '%s\n' '{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[{"id":"io.github.kallupx.oma-mullvad","refreshIntervalSec":30,"siblingValue":"preserved","favoriteLocations":[{"countryCode":"se","cityCode":"got","country":"Sweden","city":"Gothenburg"}],"recentLocations":[{"countryCode":"de","cityCode":"ber","country":"Germany","city":"Berlin"}],"recentExcludedApps":["org.example.Safe.desktop"]}]}},"plugins":[]}' > "$shell_json"
+log="$scratch/scoped-settings.log"
+MULLVAD_SHELL_JSON="$shell_json" OMARCHY_SHELL_DIR="$omarchy_shell_dir" QML_IMPORT_PATH="$scratch/qmlroot" \
+  timeout 10 qs -n -p "$probe_dir/scoped-settings-probe.qml" > "$log" 2>&1
+command_status=$?
+json="$("$probe_dir/collect-result" "$log" "$command_status")" || exit 1
+node "$probe_dir/json-assert.mjs" "$json" \
+  note empty ignored initialFavorites eq 1 initialRecents eq 1 initialApps eq 1 \
+  foreignRejected eq true ownService eq true foreignService eq true \
+  saved eq true siblingPreserved eq true invalidRejected eq true deletedRejected eq true \
+  recreatedSaved eq true replacementWorks eq true finalApps eq 1 writes eq 2

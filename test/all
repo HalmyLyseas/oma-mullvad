@@ -8,4 +8,5 @@ node --test "$root/tests"/*.test.js || status=1
 node "$root/test/cli-contract.mjs" || status=1
 bash "$root/test/probe/run" || status=1
 bash "$root/test/probe/run-ui" || status=1
+bash "$root/test/probe/run-settings" || status=1
 exit "$status"
