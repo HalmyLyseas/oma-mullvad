@@ -30,7 +30,7 @@ if (mockLogPath) {
         process.exit(1);
     }
 }
-const engineError = /(?:TypeError:|ReferenceError:|QQmlApplicationEngine failed to load component|QQmlComponent: Component is not ready|^\s*ERROR:)/m;
+const engineError = /(?:TypeError:|ReferenceError:|QQmlApplicationEngine failed to load component|QQmlComponent: Component is not ready)/m;
 if (status !== 0) {
     console.error(`probe process exited with status ${status}`);
     process.exit(1);

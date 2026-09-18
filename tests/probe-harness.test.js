@@ -23,6 +23,11 @@ test("probe result collector accepts one prefixed Quickshell result", () => {
     assert.deepEqual(JSON.parse(result.stdout), { note: "", passed: true });
 });
 
+test("probe result collector does not mistake application ERROR data for an engine failure", () => {
+    const result = collect('ERROR: simulated service state\nPROBE_RESULT {"note":"","passed":true}\n');
+    assert.equal(result.status, 0, result.stderr);
+});
+
 for (const [name, log, status] of [
     ["nonzero qs exit", 'PROBE_RESULT {"note":"","passed":true}\n', 7],
     ["timeout exit", 'PROBE_RESULT {"note":"","passed":true}\n', 124],
